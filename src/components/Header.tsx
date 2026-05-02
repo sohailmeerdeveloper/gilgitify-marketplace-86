@@ -1,0 +1,86 @@
+import { Link, NavLink, useLocation } from "react-router-dom";
+import { ShoppingCart, User, Menu, X, Mountain } from "lucide-react";
+import { useState } from "react";
+import { useStore } from "@/store/StoreContext";
+import { Button } from "@/components/ui/button";
+
+export function Header() {
+  const { cartCount, user } = useStore();
+  const [open, setOpen] = useState(false);
+  const loc = useLocation();
+
+  const links = [
+    { to: "/", label: "Home" },
+    { to: "/shop", label: "Shop" },
+    { to: "/about", label: "About" },
+    { to: "/contact", label: "Contact" },
+  ];
+
+  return (
+    <header className="sticky top-0 z-40 bg-primary text-primary-foreground shadow-card">
+      <div className="container flex items-center justify-between h-16 md:h-20 gap-4">
+        <Link to="/" className="flex items-center gap-2 group">
+          <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center shadow-md">
+            <Mountain className="w-6 h-6 text-primary" strokeWidth={2.5} />
+          </div>
+          <span className="font-display text-2xl md:text-3xl tracking-wide">Gilgitify</span>
+        </Link>
+
+        <nav className="hidden md:flex items-center gap-1">
+          {links.map(l => (
+            <NavLink key={l.to} to={l.to} end={l.to === "/"}
+              className={({ isActive }) =>
+                `px-4 py-2 rounded-full text-sm font-medium transition-all ${isActive ? "bg-white/20" : "hover:bg-white/10"}`}
+            >{l.label}</NavLink>
+          ))}
+        </nav>
+
+        <div className="flex items-center gap-2">
+          <Link to="/cart" className="relative p-2 rounded-full hover:bg-white/10 transition-colors">
+            <ShoppingCart className="w-5 h-5" />
+            {cartCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 bg-accent text-accent-foreground text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+                {cartCount}
+              </span>
+            )}
+          </Link>
+          {user ? (
+            <Link to="/profile" className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-full hover:bg-white/10 transition-colors">
+              <User className="w-4 h-4" />
+              <span className="text-sm font-medium max-w-[100px] truncate">{user.name}</span>
+            </Link>
+          ) : (
+            <Link to="/login" className="hidden sm:block">
+              <Button variant="secondary" size="sm" className="rounded-full">Login</Button>
+            </Link>
+          )}
+          <button className="md:hidden p-2 rounded-full hover:bg-white/10" onClick={() => setOpen(o => !o)} aria-label="Menu">
+            {open ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+          </button>
+        </div>
+      </div>
+
+      {open && (
+        <div className="md:hidden border-t border-white/10 animate-fade-in">
+          <nav className="container py-3 flex flex-col gap-1">
+            {links.map(l => (
+              <Link key={l.to} to={l.to} onClick={() => setOpen(false)}
+                className={`px-4 py-2.5 rounded-lg text-sm font-medium ${loc.pathname === l.to ? "bg-white/20" : "hover:bg-white/10"}`}>
+                {l.label}
+              </Link>
+            ))}
+            {user ? (
+              <>
+                <Link to="/profile" onClick={() => setOpen(false)} className="px-4 py-2.5 rounded-lg hover:bg-white/10 text-sm font-medium">Profile</Link>
+                <Link to="/orders" onClick={() => setOpen(false)} className="px-4 py-2.5 rounded-lg hover:bg-white/10 text-sm font-medium">My Orders</Link>
+                {user.isAdmin && <Link to="/admin" onClick={() => setOpen(false)} className="px-4 py-2.5 rounded-lg hover:bg-white/10 text-sm font-medium">Admin</Link>}
+              </>
+            ) : (
+              <Link to="/login" onClick={() => setOpen(false)} className="px-4 py-2.5 rounded-lg hover:bg-white/10 text-sm font-medium">Login / Sign up</Link>
+            )}
+          </nav>
+        </div>
+      )}
+    </header>
+  );
+}
