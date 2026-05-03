@@ -7,7 +7,9 @@ export function Footer() {
     <footer className="mt-16 bg-primary-deep text-primary-foreground">
       <div className="container py-12 grid gap-10 md:grid-cols-4">
         <div>
-          <div className="font-display text-3xl mb-3">Gilgitify</div>
+          <div className="bg-white rounded-xl p-2 inline-block mb-3">
+            <img src={logo} alt="Gilgitify" className="h-14 w-auto object-contain" />
+          </div>
           <p className="text-sm text-white/80 leading-relaxed">
             Gilgit-Baltistan's modern delivery store. Fresh groceries, meat, vegetables and essentials at your doorstep.
           </p>
