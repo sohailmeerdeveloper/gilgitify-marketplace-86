@@ -33,6 +33,10 @@ export function Header() {
                 `px-4 py-2 rounded-full text-sm font-medium transition-all ${isActive ? "bg-white/20" : "hover:bg-white/10"}`}
             >{l.label}</NavLink>
           ))}
+          <NavLink to="/admin"
+            className={({ isActive }) =>
+              `px-4 py-2 rounded-full text-sm font-medium transition-all ${isActive ? "bg-white/20" : "hover:bg-white/10"}`}
+          >Admin</NavLink>
         </nav>
 
         <div className="flex items-center gap-2">
@@ -47,7 +51,7 @@ export function Header() {
           {user ? (
             <>
               {user.isAdmin && (
-                <Link to="/admin" className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-full bg-accent text-accent-foreground text-sm font-semibold hover:opacity-90 transition-opacity">
+                <Link to="/admin" className="hidden lg:flex items-center gap-1.5 px-3 py-2 rounded-full bg-accent text-accent-foreground text-sm font-semibold hover:opacity-90 transition-opacity">
                   <LayoutDashboard className="w-4 h-4" /> Admin
                 </Link>
               )}
@@ -82,11 +86,11 @@ export function Header() {
                 {l.label}
               </Link>
             ))}
+            <Link to="/admin" onClick={() => setOpen(false)} className={`px-4 py-2.5 rounded-lg text-sm font-medium ${loc.pathname === "/admin" ? "bg-white/20" : "hover:bg-white/10"}`}>Admin</Link>
             {user ? (
               <>
                 <Link to="/profile" onClick={() => setOpen(false)} className="px-4 py-2.5 rounded-lg hover:bg-white/10 text-sm font-medium">Profile</Link>
                 <Link to="/orders" onClick={() => setOpen(false)} className="px-4 py-2.5 rounded-lg hover:bg-white/10 text-sm font-medium">My Orders</Link>
-                {user.isAdmin && <Link to="/admin" onClick={() => setOpen(false)} className="px-4 py-2.5 rounded-lg hover:bg-white/10 text-sm font-medium">Admin</Link>}
               </>
             ) : (
               <Link to="/login" onClick={() => setOpen(false)} className="px-4 py-2.5 rounded-lg hover:bg-white/10 text-sm font-medium">Login / Sign up</Link>

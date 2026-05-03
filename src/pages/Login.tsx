@@ -18,7 +18,7 @@ const Login = () => {
     const res = login(email, password);
     if (!res.ok) return toast.error(res.msg!);
     toast.success("Welcome back!");
-    nav("/");
+    nav(email.trim().toLowerCase() === "admin@gilgitify.pk" ? "/admin" : "/");
   };
 
   return (
