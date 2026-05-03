@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { Instagram, Facebook, Phone, MapPin, Mail } from "lucide-react";
+import logo from "@/assets/gilgitify-logo.png";
 
 export function Footer() {
   return (
