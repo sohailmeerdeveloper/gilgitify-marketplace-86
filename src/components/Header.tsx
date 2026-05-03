@@ -1,5 +1,6 @@
 import { Link, NavLink, useLocation } from "react-router-dom";
-import { ShoppingCart, User, Menu, X, Mountain, LayoutDashboard, Package, LogOut } from "lucide-react";
+import { ShoppingCart, User, Menu, X, LayoutDashboard, Package, LogOut } from "lucide-react";
+import logo from "@/assets/gilgitify-logo.png";
 import { useState } from "react";
 import { useStore } from "@/store/StoreContext";
 import { Button } from "@/components/ui/button";
@@ -19,11 +20,10 @@ export function Header() {
   return (
     <header className="sticky top-0 z-40 bg-primary text-primary-foreground shadow-card">
       <div className="container flex items-center justify-between h-16 md:h-20 gap-4">
-        <Link to="/" className="flex items-center gap-2 group">
-          <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center shadow-md">
-            <Mountain className="w-6 h-6 text-primary" strokeWidth={2.5} />
+        <Link to="/" className="flex items-center group">
+          <div className="bg-white rounded-xl px-2 py-1 shadow-md">
+            <img src={logo} alt="Gilgitify" className="h-10 md:h-12 w-auto object-contain" />
           </div>
-          <span className="font-display text-2xl md:text-3xl tracking-wide">Gilgitify</span>
         </Link>
 
         <nav className="hidden md:flex items-center gap-1">
