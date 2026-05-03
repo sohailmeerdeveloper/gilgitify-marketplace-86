@@ -1,11 +1,11 @@
 import { Link, NavLink, useLocation } from "react-router-dom";
-import { ShoppingCart, User, Menu, X, Mountain } from "lucide-react";
+import { ShoppingCart, User, Menu, X, Mountain, LayoutDashboard, Package, LogOut } from "lucide-react";
 import { useState } from "react";
 import { useStore } from "@/store/StoreContext";
 import { Button } from "@/components/ui/button";
 
 export function Header() {
-  const { cartCount, user } = useStore();
+  const { cartCount, user, logout } = useStore();
   const [open, setOpen] = useState(false);
   const loc = useLocation();
 
@@ -45,10 +45,23 @@ export function Header() {
             )}
           </Link>
           {user ? (
-            <Link to="/profile" className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-full hover:bg-white/10 transition-colors">
-              <User className="w-4 h-4" />
-              <span className="text-sm font-medium max-w-[100px] truncate">{user.name}</span>
-            </Link>
+            <>
+              {user.isAdmin && (
+                <Link to="/admin" className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-full bg-accent text-accent-foreground text-sm font-semibold hover:opacity-90 transition-opacity">
+                  <LayoutDashboard className="w-4 h-4" /> Admin
+                </Link>
+              )}
+              <Link to="/orders" className="hidden md:flex items-center gap-1.5 px-3 py-2 rounded-full hover:bg-white/10 transition-colors text-sm font-medium">
+                <Package className="w-4 h-4" /> Orders
+              </Link>
+              <Link to="/profile" className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-full hover:bg-white/10 transition-colors">
+                <User className="w-4 h-4" />
+                <span className="text-sm font-medium max-w-[100px] truncate">{user.name}</span>
+              </Link>
+              <button onClick={logout} className="hidden sm:flex items-center p-2 rounded-full hover:bg-white/10" aria-label="Logout">
+                <LogOut className="w-4 h-4" />
+              </button>
+            </>
           ) : (
             <Link to="/login" className="hidden sm:block">
               <Button variant="secondary" size="sm" className="rounded-full">Login</Button>
