@@ -48,12 +48,41 @@ const StoreCtx = createContext<StoreState | null>(null);
 const KEY = "gilgitify_v1";
 type Persisted = { cart: CartItem[]; user: User | null; users: (User & { password: string })[]; orders: Order[]; products: Product[] };
 
+const ADMIN_EMAIL = "admin@gilgitify.pk";
+const ADMIN_PASSWORD = "admin123";
+const ADMIN_USER: User & { password: string } = {
+  id: "admin",
+  name: "Admin",
+  email: ADMIN_EMAIL,
+  password: ADMIN_PASSWORD,
+  isAdmin: true,
+};
+
+function normalize(data?: Partial<Persisted>): Persisted {
+  const users = Array.isArray(data?.users) ? data.users : [];
+  const hasAdmin = users.some(u => u.email?.toLowerCase() === ADMIN_EMAIL);
+  const normalizedUsers = hasAdmin
+    ? users.map(u => u.email?.toLowerCase() === ADMIN_EMAIL ? { ...u, ...ADMIN_USER, id: u.id || ADMIN_USER.id } : u)
+    : [ADMIN_USER, ...users];
+  const currentUser = data?.user?.email?.toLowerCase() === ADMIN_EMAIL
+    ? { id: data.user.id || ADMIN_USER.id, name: data.user.name || ADMIN_USER.name, email: ADMIN_EMAIL, isAdmin: true }
+    : data?.user ?? null;
+
+  return {
+    cart: Array.isArray(data?.cart) ? data.cart : [],
+    user: currentUser,
+    users: normalizedUsers,
+    orders: Array.isArray(data?.orders) ? data.orders : [],
+    products: Array.isArray(data?.products) ? data.products : seedProducts,
+  };
+}
+
 function load(): Persisted {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) return normalize(JSON.parse(raw));
   } catch {}
-  return { cart: [], user: null, users: [{ id: "admin", name: "Admin", email: "admin@gilgitify.pk", password: "admin123", isAdmin: true }], orders: [], products: seedProducts };
+  return normalize();
 }
 
 export function StoreProvider({ children }: { children: ReactNode }) {
