@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Product, seedProducts } from "@/data/products";
+import { notifyAdmin } from "@/lib/adminAuth";
 
 export interface CartItem { product: Product; qty: number; }
 export interface User { id: string; name: string; email: string; phone?: string; address?: string; isAdmin?: boolean; }
@@ -8,6 +9,7 @@ export interface Order {
   id: string;
   userId: string;
   userName: string;
+  email?: string;
   items: CartItem[];
   subtotal: number;
   deliveryFee: number;
@@ -39,7 +41,7 @@ interface StoreState {
   logout: () => Promise<void>;
   updateProfile: (patch: Partial<User>) => Promise<{ ok: boolean; msg?: string }>;
   refreshAdminUsers: () => Promise<void>;
-  placeOrder: (data: { address: string; phone: string; muhallah: string; paymentMethod: "cod" | "easypaisa"; location?: { lat: number; lng: number } | null }) => Order;
+  placeOrder: (data: { name: string; email?: string; address: string; phone: string; muhallah: string; paymentMethod: "cod" | "easypaisa"; location?: { lat: number; lng: number } | null }) => Order;
   updateOrderStatus: (id: string, status: Order["status"]) => void;
   addProduct: (p: Omit<Product, "id">) => void;
   updateProduct: (id: string, patch: Partial<Product>) => void;
@@ -262,20 +264,40 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const order: Order = {
       id: "ORD-" + Date.now().toString(36).toUpperCase(),
       userId: user?.id || "guest",
-      userName: user?.name || "Guest",
+      userName: data.name?.trim() || user?.name || "Guest",
+      email: data.email?.trim() || user?.email,
       items: state.cart,
       subtotal, deliveryFee, total,
-      ...data,
+      address: data.address,
+      phone: data.phone,
+      muhallah: data.muhallah,
+      paymentMethod: data.paymentMethod,
       status: "pending",
       createdAt: new Date().toISOString(),
       location: data.location ?? null,
     };
     setState(s => ({ ...s, orders: [order, ...s.orders], cart: [] }));
+
+    const itemsList = order.items.map(i => `• ${i.product.name} × ${i.qty} — Rs. ${i.product.price * i.qty}`).join("\n");
+    const mapLink = order.location ? `\nMap: https://www.google.com/maps?q=${order.location.lat},${order.location.lng}` : "";
+    notifyAdmin(
+      `New order ${order.id} — Rs. ${order.total}`,
+      `A new order was placed on Gilgitify.\n\nOrder ID: ${order.id}\nCustomer: ${order.userName}\nPhone: ${order.phone}\nEmail: ${order.email || "—"}\nAddress: ${order.address}, ${order.muhallah}\nPayment: ${order.paymentMethod === "cod" ? "Cash on Delivery" : "Easypaisa"}\n\nItems:\n${itemsList}\n\nSubtotal: Rs. ${order.subtotal}\nDelivery: Rs. ${order.deliveryFee}\nTotal: Rs. ${order.total}${mapLink}`,
+      { orderId: order.id, total: order.total, customer: order.userName, phone: order.phone }
+    );
+
     return order;
   };
 
-  const updateOrderStatus = (id: string, status: Order["status"]) =>
+  const updateOrderStatus = (id: string, status: Order["status"]) => {
     setState(s => ({ ...s, orders: s.orders.map(o => o.id === id ? { ...o, status } : o) }));
+    const o = state.orders.find(x => x.id === id);
+    if (o) notifyAdmin(
+      `Order ${id} → ${status}`,
+      `Order ${id} for ${o.userName} (${o.phone}) was updated to status: ${status}.`,
+      { orderId: id, status }
+    );
+  };
 
   const addProduct = (p: Omit<Product, "id">) =>
     setState(s => ({ ...s, products: [{ ...p, id: "p" + Date.now() }, ...s.products] }));

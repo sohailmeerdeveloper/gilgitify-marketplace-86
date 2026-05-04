@@ -1,34 +1,198 @@
 import { Layout } from "@/components/Layout";
 import { useStore } from "@/store/StoreContext";
-import { Navigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { useEffect, useState } from "react";
-import { Trash2, Edit, Plus, X, Bell } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Trash2, Edit, Plus, X, Bell, LogOut, Mail, KeyRound, ShieldCheck, Users, Package, ShoppingBag, Wallet, Clock, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import { Product, categories, Category } from "@/data/products";
+import {
+  getAdminCreds,
+  saveAdminCreds,
+  isAdminLoggedIn,
+  setAdminSession,
+  clearAdminSession,
+  saveResetCode,
+  consumeResetCode,
+  generateCode,
+  sendResetEmail,
+  notifyAdmin,
+  sendFormSubmit,
+} from "@/lib/adminAuth";
 
 const empty = { name: "", price: 0, category: "grocery" as Category, image: "", description: "", unit: "1 kg", stock: 10 };
 
+type AuthScreen = "login" | "forgot" | "reset";
+
 const Admin = () => {
-  const { user, authLoading, products, orders, addProduct, updateProduct, deleteProduct, updateOrderStatus, users, refreshAdminUsers } = useStore();
-  const [tab, setTab] = useState<"overview" | "products" | "orders" | "customers">("overview");
+  const [authed, setAuthed] = useState<boolean>(() => isAdminLoggedIn());
+  const [screen, setScreen] = useState<AuthScreen>("login");
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPwd, setLoginPwd] = useState("");
+  const [resetCode, setResetCode] = useState("");
+  const [newPwd, setNewPwd] = useState("");
+  const [newPwd2, setNewPwd2] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    const creds = getAdminCreds();
+    if (loginEmail.trim().toLowerCase() === creds.email.toLowerCase() && loginPwd === creds.password) {
+      setAdminSession();
+      setAuthed(true);
+      toast.success("Welcome back, admin");
+    } else {
+      toast.error("Incorrect email or password");
+    }
+  };
+
+  const handleSendReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    const creds = getAdminCreds();
+    const code = generateCode();
+    saveResetCode(code);
+    const ok = await sendResetEmail(creds.email, code);
+    setBusy(false);
+    if (ok) {
+      toast.success(`Reset code sent to ${creds.email}`);
+      setScreen("reset");
+    } else {
+      toast.error("Could not send email. Check FormSubmit activation.");
+    }
+  };
+
+  const handleReset = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newPwd.length < 4) return toast.error("Password too short");
+    if (newPwd !== newPwd2) return toast.error("Passwords do not match");
+    if (!consumeResetCode(resetCode)) return toast.error("Invalid or expired code");
+    const creds = getAdminCreds();
+    saveAdminCreds({ ...creds, password: newPwd });
+    toast.success("Password updated. Please log in.");
+    setScreen("login");
+    setResetCode(""); setNewPwd(""); setNewPwd2("");
+  };
+
+  if (!authed) {
+    return (
+      <Layout>
+        <div className="container py-12 max-w-md mx-auto">
+          <div className="bg-card rounded-3xl shadow-card p-8 animate-fade-in">
+            <div className="flex flex-col items-center mb-6">
+              <div className="w-14 h-14 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mb-3">
+                <ShieldCheck className="w-7 h-7" />
+              </div>
+              <h1 className="font-display text-3xl text-primary-deep">Admin Access</h1>
+              <p className="text-sm text-muted-foreground mt-1">Restricted area — staff only</p>
+            </div>
+
+            {screen === "login" && (
+              <form onSubmit={handleLogin} className="space-y-4">
+                <div>
+                  <Label>Email</Label>
+                  <Input type="email" required value={loginEmail} onChange={e => setLoginEmail(e.target.value)} placeholder="admin@example.com" />
+                </div>
+                <div>
+                  <Label>Password</Label>
+                  <Input type="password" required value={loginPwd} onChange={e => setLoginPwd(e.target.value)} />
+                </div>
+                <Button type="submit" className="w-full rounded-full">Sign in</Button>
+                <button type="button" onClick={() => setScreen("forgot")} className="text-sm text-primary hover:underline w-full text-center">
+                  Forgot password?
+                </button>
+              </form>
+            )}
+
+            {screen === "forgot" && (
+              <form onSubmit={handleSendReset} className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  We'll email a 6-digit reset code to the admin email on file.
+                </p>
+                <Button type="submit" disabled={busy} className="w-full rounded-full">
+                  <Mail className="w-4 h-4 mr-2" /> {busy ? "Sending..." : "Send reset code"}
+                </Button>
+                <div className="flex justify-between text-sm">
+                  <button type="button" onClick={() => setScreen("login")} className="text-primary hover:underline">Back to login</button>
+                  <button type="button" onClick={() => setScreen("reset")} className="text-primary hover:underline">I have a code</button>
+                </div>
+              </form>
+            )}
+
+            {screen === "reset" && (
+              <form onSubmit={handleReset} className="space-y-4">
+                <div>
+                  <Label>6-digit code</Label>
+                  <Input required value={resetCode} onChange={e => setResetCode(e.target.value)} placeholder="123456" maxLength={6} />
+                </div>
+                <div>
+                  <Label>New password</Label>
+                  <Input type="password" required value={newPwd} onChange={e => setNewPwd(e.target.value)} />
+                </div>
+                <div>
+                  <Label>Confirm password</Label>
+                  <Input type="password" required value={newPwd2} onChange={e => setNewPwd2(e.target.value)} />
+                </div>
+                <Button type="submit" className="w-full rounded-full">
+                  <KeyRound className="w-4 h-4 mr-2" /> Update password
+                </Button>
+                <button type="button" onClick={() => setScreen("login")} className="text-sm text-primary hover:underline w-full text-center">Back to login</button>
+              </form>
+            )}
+          </div>
+        </div>
+      </Layout>
+    );
+  }
+
+  return <Dashboard onLogout={() => { clearAdminSession(); setAuthed(false); setScreen("login"); }} />;
+};
+
+interface DashProps { onLogout: () => void }
+
+const Dashboard = ({ onLogout }: DashProps) => {
+  const { products, orders, addProduct, updateProduct, deleteProduct, updateOrderStatus } = useStore();
+  const [tab, setTab] = useState<"overview" | "products" | "orders" | "clients" | "settings">("overview");
   const [editing, setEditing] = useState<Product | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<Omit<Product, "id">>(empty);
 
-  useEffect(() => {
-    if (user?.isAdmin) refreshAdminUsers();
-  }, [user?.isAdmin, refreshAdminUsers]);
-
-  if (authLoading) return <Layout><div className="container py-16 text-center text-muted-foreground">Loading secure dashboard...</div></Layout>;
-  if (!user) return <Navigate to="/login" replace />;
-  if (!user.isAdmin) return <Navigate to="/" replace />;
-
   const newOrders = orders.filter(o => o.status === "pending").length;
-  const revenue = orders.filter(o => o.status === "delivered").reduce((s, o) => s + o.total, 0);
+  const inQueue = orders.filter(o => ["pending", "preparing", "out_for_delivery"].includes(o.status)).length;
+  const completed = orders.filter(o => o.status === "delivered").length;
+  const today = new Date().toDateString();
+  const revenueToday = orders
+    .filter(o => o.status === "delivered" && new Date(o.createdAt).toDateString() === today)
+    .reduce((s, o) => s + o.total, 0);
+  const revenueAll = orders.filter(o => o.status === "delivered").reduce((s, o) => s + o.total, 0);
+  const ordersToday = orders.filter(o => new Date(o.createdAt).toDateString() === today).length;
+
+  const clients = useMemo(() => {
+    const map = new Map<string, { key: string; name: string; phone: string; address: string; muhallah: string; orders: number; lastOrder: string; total: number }>();
+    orders.forEach(o => {
+      const key = `${o.phone || o.userId}`;
+      const existing = map.get(key);
+      if (existing) {
+        existing.orders += 1;
+        existing.total += o.total;
+        if (o.createdAt > existing.lastOrder) existing.lastOrder = o.createdAt;
+      } else {
+        map.set(key, {
+          key,
+          name: o.userName,
+          phone: o.phone,
+          address: o.address,
+          muhallah: o.muhallah,
+          orders: 1,
+          lastOrder: o.createdAt,
+          total: o.total,
+        });
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => b.lastOrder.localeCompare(a.lastOrder));
+  }, [orders]);
 
   const openNew = () => { setEditing(null); setForm(empty); setShowForm(true); };
   const openEdit = (p: Product) => { setEditing(p); setForm(p); setShowForm(true); };
@@ -46,40 +210,86 @@ const Admin = () => {
     reader.readAsDataURL(f);
   };
 
+  const stats = [
+    { label: "Products", value: products.length, icon: Package, tone: "bg-primary/10 text-primary" },
+    { label: "Total Orders", value: orders.length, icon: ShoppingBag, tone: "bg-accent/10 text-accent" },
+    { label: "Orders Today", value: ordersToday, icon: Clock, tone: "bg-blue-100 text-blue-700" },
+    { label: "In Queue", value: inQueue, icon: Bell, tone: "bg-amber-100 text-amber-700" },
+    { label: "Completed", value: completed, icon: CheckCircle2, tone: "bg-emerald-100 text-emerald-700" },
+    { label: "Revenue Today", value: `Rs. ${revenueToday}`, icon: Wallet, tone: "bg-emerald-100 text-emerald-700" },
+    { label: "Total Revenue", value: `Rs. ${revenueAll}`, icon: Wallet, tone: "bg-primary/10 text-primary" },
+    { label: "Clients", value: clients.length, icon: Users, tone: "bg-fuchsia-100 text-fuchsia-700" },
+  ];
+
   return (
     <Layout>
       <div className="container py-10">
         <div className="flex items-center justify-between flex-wrap gap-4 mb-6">
-          <h1 className="font-display text-4xl text-primary-deep">Admin Dashboard</h1>
-          {newOrders > 0 && (
-            <div className="flex items-center gap-2 px-4 py-2 bg-accent/10 text-accent rounded-full text-sm font-semibold animate-pulse">
-              <Bell className="w-4 h-4" /> {newOrders} new order{newOrders > 1 ? "s" : ""}
-            </div>
-          )}
+          <div>
+            <h1 className="font-display text-4xl text-primary-deep">Admin Dashboard</h1>
+            <p className="text-sm text-muted-foreground">Manage your store from here</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {newOrders > 0 && (
+              <div className="flex items-center gap-2 px-4 py-2 bg-accent/10 text-accent rounded-full text-sm font-semibold animate-pulse">
+                <Bell className="w-4 h-4" /> {newOrders} new order{newOrders > 1 ? "s" : ""}
+              </div>
+            )}
+            <Button variant="outline" className="rounded-full" onClick={onLogout}>
+              <LogOut className="w-4 h-4 mr-1" /> Logout
+            </Button>
+          </div>
         </div>
 
         <div className="flex gap-2 mb-6 overflow-x-auto">
-          {(["overview", "products", "orders", "customers"] as const).map(t => (
+          {(["overview", "products", "orders", "clients", "settings"] as const).map(t => (
             <button key={t} onClick={() => setTab(t)}
-              className={`px-4 py-2 rounded-full text-sm font-semibold whitespace-nowrap ${tab === t ? "bg-primary text-primary-foreground" : "bg-secondary"}`}>
-              {t[0].toUpperCase() + t.slice(1)}
+              className={`px-4 py-2 rounded-full text-sm font-semibold whitespace-nowrap capitalize ${tab === t ? "bg-primary text-primary-foreground" : "bg-secondary"}`}>
+              {t}
             </button>
           ))}
         </div>
 
         {tab === "overview" && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {[
-              { label: "Products", value: products.length },
-              { label: "Total Orders", value: orders.length },
-              { label: "Pending Orders", value: newOrders },
-              { label: "Revenue", value: `Rs. ${revenue}` },
-            ].map(s => (
-              <div key={s.label} className="bg-card rounded-2xl p-5 shadow-card">
-                <div className="text-sm text-muted-foreground">{s.label}</div>
-                <div className="text-3xl font-bold text-primary-deep mt-1">{s.value}</div>
-              </div>
-            ))}
+          <div className="space-y-6">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {stats.map(s => {
+                const Icon = s.icon;
+                return (
+                  <div key={s.label} className="bg-card rounded-2xl p-5 shadow-card">
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm text-muted-foreground">{s.label}</div>
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${s.tone}`}>
+                        <Icon className="w-4 h-4" />
+                      </div>
+                    </div>
+                    <div className="text-2xl md:text-3xl font-bold text-primary-deep mt-2">{s.value}</div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="bg-card rounded-2xl shadow-card p-5">
+              <h3 className="font-bold text-lg mb-3">Latest Orders</h3>
+              {orders.slice(0, 5).length === 0 ? (
+                <p className="text-sm text-muted-foreground">No orders yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {orders.slice(0, 5).map(o => (
+                    <div key={o.id} className="flex items-center justify-between text-sm border-b last:border-0 pb-2 last:pb-0">
+                      <div>
+                        <div className="font-medium">{o.userName} <span className="text-muted-foreground">• {o.phone}</span></div>
+                        <div className="text-xs text-muted-foreground">{new Date(o.createdAt).toLocaleString()}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="font-semibold">Rs. {o.total}</div>
+                        <div className="text-xs capitalize text-muted-foreground">{o.status.replace(/_/g, " ")}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -146,7 +356,7 @@ const Admin = () => {
                     <div className="font-mono text-sm">{o.id}</div>
                     <div className="text-xs text-muted-foreground">{new Date(o.createdAt).toLocaleString()} • {o.userName}</div>
                   </div>
-                  <select value={o.status} onChange={e => updateOrderStatus(o.id, e.target.value as any)} className="rounded-full border px-3 py-1 text-sm bg-background">
+                  <select value={o.status} onChange={e => updateOrderStatus(o.id, e.target.value as Parameters<typeof updateOrderStatus>[1])} className="rounded-full border px-3 py-1 text-sm bg-background">
                     <option value="pending">Pending</option>
                     <option value="preparing">Preparing</option>
                     <option value="out_for_delivery">Out for Delivery</option>
@@ -166,27 +376,114 @@ const Admin = () => {
           </div>
         )}
 
-        {tab === "customers" && (
+        {tab === "clients" && (
           <div className="bg-card rounded-2xl shadow-card overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-secondary"><tr>
-                <th className="text-left p-3">Name</th><th className="text-left p-3">Email</th><th className="text-left p-3">Orders</th>
-              </tr></thead>
-              <tbody>
-                {users.filter(u => !u.isAdmin).map(u => (
-                  <tr key={u.id} className="border-t">
-                    <td className="p-3 font-medium">{u.name}</td>
-                    <td className="p-3">{u.email}</td>
-                    <td className="p-3">{orders.filter(o => o.userId === u.id).length}</td>
-                  </tr>
-                ))}
-                {users.filter(u => !u.isAdmin).length === 0 && <tr><td colSpan={3} className="p-6 text-center text-muted-foreground">No customers yet.</td></tr>}
-              </tbody>
-            </table>
+            <div className="p-4 border-b">
+              <h3 className="font-bold">Clients ({clients.length})</h3>
+              <p className="text-xs text-muted-foreground">Newest customers shown first</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-secondary"><tr>
+                  <th className="text-left p-3">Name</th>
+                  <th className="text-left p-3">Phone</th>
+                  <th className="text-left p-3">Address</th>
+                  <th className="text-left p-3">Orders</th>
+                  <th className="text-left p-3">Total spent</th>
+                  <th className="text-left p-3">Last order</th>
+                </tr></thead>
+                <tbody>
+                  {clients.map(c => (
+                    <tr key={c.key} className="border-t">
+                      <td className="p-3 font-medium">{c.name}</td>
+                      <td className="p-3">{c.phone}</td>
+                      <td className="p-3">{c.address}, {c.muhallah}</td>
+                      <td className="p-3">{c.orders}</td>
+                      <td className="p-3">Rs. {c.total}</td>
+                      <td className="p-3 text-xs text-muted-foreground">{new Date(c.lastOrder).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                  {clients.length === 0 && <tr><td colSpan={6} className="p-6 text-center text-muted-foreground">No clients yet.</td></tr>}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
+
+        {tab === "settings" && <SettingsPanel />}
       </div>
     </Layout>
+  );
+};
+
+const SettingsPanel = () => {
+  const [creds, setCreds] = useState(() => getAdminCreds());
+  const [email, setEmail] = useState(creds.email);
+  const [currentPwd, setCurrentPwd] = useState("");
+  const [newPwd, setNewPwd] = useState("");
+  const [newPwd2, setNewPwd2] = useState("");
+
+  useEffect(() => { setEmail(creds.email); }, [creds.email]);
+
+  const saveEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = email.trim();
+    if (!trimmed || !trimmed.includes("@")) return toast.error("Enter a valid email");
+    const oldEmail = creds.email;
+    const next = { ...creds, email: trimmed };
+    saveAdminCreds(next);
+    setCreds(next);
+    toast.success("Admin email updated");
+    const when = new Date().toLocaleString();
+    sendFormSubmit(oldEmail, "Gilgitify admin email changed",
+      `The admin email on Gilgitify was changed.\n\nOld email: ${oldEmail}\nNew email: ${trimmed}\nWhen: ${when}\n\nIf this wasn't you, reset the password immediately.`);
+    sendFormSubmit(trimmed, "You're now the Gilgitify admin email",
+      `This email (${trimmed}) is now the active admin contact for Gilgitify. You'll receive new-order alerts and password reset codes here.\nWhen: ${when}`);
+  };
+
+  const savePwd = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (currentPwd !== creds.password) return toast.error("Current password is wrong");
+    if (newPwd.length < 4) return toast.error("Password too short");
+    if (newPwd !== newPwd2) return toast.error("Passwords do not match");
+    const next = { ...creds, password: newPwd };
+    saveAdminCreds(next);
+    setCreds(next);
+    setCurrentPwd(""); setNewPwd(""); setNewPwd2("");
+    toast.success("Password updated");
+    notifyAdmin("Gilgitify admin password changed",
+      `The admin password was changed at ${new Date().toLocaleString()}.\n\nIf this wasn't you, use "Forgot password" on the login screen to reset it.`);
+  };
+
+  return (
+    <div className="grid md:grid-cols-2 gap-4">
+      <form onSubmit={saveEmail} className="bg-card rounded-2xl shadow-card p-5 space-y-3">
+        <h3 className="font-bold text-lg flex items-center gap-2"><Mail className="w-4 h-4" /> Change admin email</h3>
+        <p className="text-xs text-muted-foreground">This is where reset codes and order notifications go.</p>
+        <div>
+          <Label>Admin email</Label>
+          <Input type="email" value={email} onChange={e => setEmail(e.target.value)} required />
+        </div>
+        <Button type="submit" className="rounded-full">Save email</Button>
+      </form>
+
+      <form onSubmit={savePwd} className="bg-card rounded-2xl shadow-card p-5 space-y-3">
+        <h3 className="font-bold text-lg flex items-center gap-2"><KeyRound className="w-4 h-4" /> Change password</h3>
+        <div>
+          <Label>Current password</Label>
+          <Input type="password" value={currentPwd} onChange={e => setCurrentPwd(e.target.value)} required />
+        </div>
+        <div>
+          <Label>New password</Label>
+          <Input type="password" value={newPwd} onChange={e => setNewPwd(e.target.value)} required />
+        </div>
+        <div>
+          <Label>Confirm new password</Label>
+          <Input type="password" value={newPwd2} onChange={e => setNewPwd2(e.target.value)} required />
+        </div>
+        <Button type="submit" className="rounded-full">Update password</Button>
+      </form>
+    </div>
   );
 };
 

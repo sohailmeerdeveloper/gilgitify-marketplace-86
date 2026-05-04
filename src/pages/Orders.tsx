@@ -15,7 +15,11 @@ const statusColors: Record<string, string> = {
 const Orders = () => {
   const { user, orders } = useStore();
   if (!user) return <Navigate to="/login" replace />;
-  const mine = orders.filter(o => o.userId === user.id);
+  const mine = orders.filter(o =>
+    o.userId === user.id ||
+    (user.email && o.email && o.email.toLowerCase() === user.email.toLowerCase()) ||
+    (user.phone && o.phone && o.phone === user.phone)
+  );
 
   return (
     <Layout>

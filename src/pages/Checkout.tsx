@@ -14,6 +14,7 @@ const Checkout = () => {
   const [step, setStep] = useState<"details" | "pay" | "ordered">("details");
   const [form, setForm] = useState({
     name: user?.name || "",
+    email: user?.email || "",
     phone: user?.phone || "",
     address: user?.address || "",
     muhallah: "",
@@ -39,7 +40,7 @@ const Checkout = () => {
   };
 
   const finalize = () => {
-    const order = placeOrder({ address: form.address, phone: form.phone, muhallah: form.muhallah, paymentMethod: pay, location });
+    const order = placeOrder({ name: form.name, email: form.email, address: form.address, phone: form.phone, muhallah: form.muhallah, paymentMethod: pay, location });
     setOrderId(order.id);
     setStep("ordered");
   };
@@ -90,8 +91,9 @@ const Checkout = () => {
           <div className="grid lg:grid-cols-2 gap-6">
             <form onSubmit={submit} className="bg-card rounded-3xl p-6 md:p-8 shadow-card space-y-4">
               <h2 className="text-primary-deep font-bold text-xl">Delivery Details</h2>
-              <div><Label>Full Name</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="mt-1" /></div>
-              <div><Label>Phone Number</Label><Input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} className="mt-1" /></div>
+              <div><Label>Full Name</Label><Input required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="mt-1" /></div>
+              <div><Label>Email (for order tracking)</Label><Input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} className="mt-1" placeholder="optional" /></div>
+              <div><Label>Phone Number</Label><Input required value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} className="mt-1" /></div>
               <div><Label>Address</Label><Input value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} className="mt-1" /></div>
               <div><Label>Muhallah</Label><Input value={form.muhallah} onChange={e => setForm({ ...form, muhallah: e.target.value })} className="mt-1" /></div>
 
