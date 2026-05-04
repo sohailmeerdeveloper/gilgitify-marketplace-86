@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Trash2, Edit, Plus, X, Bell } from "lucide-react";
 import { toast } from "sonner";
 import { Product, categories, Category } from "@/data/products";
@@ -13,12 +13,17 @@ import { Product, categories, Category } from "@/data/products";
 const empty = { name: "", price: 0, category: "grocery" as Category, image: "", description: "", unit: "1 kg", stock: 10 };
 
 const Admin = () => {
-  const { user, products, orders, addProduct, updateProduct, deleteProduct, updateOrderStatus, users } = useStore();
+  const { user, authLoading, products, orders, addProduct, updateProduct, deleteProduct, updateOrderStatus, users, refreshAdminUsers } = useStore();
   const [tab, setTab] = useState<"overview" | "products" | "orders" | "customers">("overview");
   const [editing, setEditing] = useState<Product | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<Omit<Product, "id">>(empty);
 
+  useEffect(() => {
+    if (user?.isAdmin) refreshAdminUsers();
+  }, [user?.isAdmin, refreshAdminUsers]);
+
+  if (authLoading) return <Layout><div className="container py-16 text-center text-muted-foreground">Loading secure dashboard...</div></Layout>;
   if (!user) return <Navigate to="/login" replace />;
   if (!user.isAdmin) return <Navigate to="/" replace />;
 
