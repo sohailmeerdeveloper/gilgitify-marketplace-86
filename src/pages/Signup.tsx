@@ -7,18 +7,30 @@ import { Label } from "@/components/ui/label";
 import { useStore } from "@/store/StoreContext";
 import { toast } from "sonner";
 
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 const Signup = () => {
   const { signup } = useStore();
   const nav = useNavigate();
   const [form, setForm] = useState({ name: "", email: "", password: "" });
+  const [submitting, setSubmitting] = useState(false);
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (form.password.length < 6) return toast.error("Password must be at least 6 characters");
-    const res = signup(form.name, form.email, form.password);
+    const name = form.name.trim();
+    const email = form.email.trim().toLowerCase();
+
+    if (name.length < 2) return toast.error("Enter your full name");
+    if (!emailPattern.test(email)) return toast.error("Enter a valid email address");
+    if (form.password.length < 8) return toast.error("Password must be at least 8 characters");
+
+    setSubmitting(true);
+    const res = await signup(name, email, form.password);
+    setSubmitting(false);
+
     if (!res.ok) return toast.error(res.msg!);
-    toast.success("Account created!");
-    nav("/");
+    toast.success(res.msg || "Account created!");
+    nav("/login");
   };
 
   return (
@@ -28,10 +40,10 @@ const Signup = () => {
           <h1 className="font-display text-4xl text-primary-deep text-center mb-2">Join Gilgitify</h1>
           <p className="text-center text-muted-foreground mb-6">Create your account</p>
           <form onSubmit={submit} className="space-y-4">
-            <div><Label>Full Name</Label><Input required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="mt-1" /></div>
-            <div><Label>Email</Label><Input type="email" required value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} className="mt-1" /></div>
-            <div><Label>Password</Label><Input type="password" required value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} className="mt-1" /></div>
-            <Button type="submit" className="w-full rounded-full" size="lg">Sign Up</Button>
+            <div><Label>Full Name</Label><Input autoComplete="name" required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="mt-1" /></div>
+            <div><Label>Email</Label><Input type="email" autoComplete="email" required value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} className="mt-1" /></div>
+            <div><Label>Password</Label><Input type="password" autoComplete="new-password" required value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} className="mt-1" /></div>
+            <Button type="submit" className="w-full rounded-full" size="lg" disabled={submitting}>{submitting ? "Creating..." : "Sign Up"}</Button>
           </form>
           <p className="text-center text-sm text-muted-foreground mt-6">
             Already have an account? <Link to="/login" className="text-primary font-semibold hover:underline">Login</Link>

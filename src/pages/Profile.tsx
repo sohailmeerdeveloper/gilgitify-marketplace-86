@@ -13,7 +13,12 @@ const Profile = () => {
   const myOrders = orders.filter(o => o.userId === user.id);
   const [form, setForm] = useState({ name: user.name, phone: user.phone || "", address: user.address || "" });
 
-  const save = (e: React.FormEvent) => { e.preventDefault(); updateProfile(form); toast.success("Profile updated"); };
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const res = await updateProfile(form);
+    if (!res.ok) return toast.error(res.msg || "Could not update profile");
+    toast.success("Profile updated");
+  };
 
   return (
     <Layout>

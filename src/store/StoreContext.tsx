@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from "react";
+import { supabase } from "@/integrations/supabase/client";
 import { Product, seedProducts } from "@/data/products";
 
 export interface CartItem { product: Product; qty: number; }
@@ -26,16 +27,18 @@ interface StoreState {
   user: User | null;
   users: User[];
   orders: Order[];
+  authLoading: boolean;
   addToCart: (p: Product, qty?: number) => void;
   removeFromCart: (id: string) => void;
   updateQty: (id: string, qty: number) => void;
   clearCart: () => void;
   cartCount: number;
   cartTotal: number;
-  signup: (name: string, email: string, password: string) => { ok: boolean; msg?: string };
-  login: (email: string, password: string) => { ok: boolean; msg?: string };
-  logout: () => void;
-  updateProfile: (patch: Partial<User>) => void;
+  signup: (name: string, email: string, password: string) => Promise<{ ok: boolean; msg?: string }>;
+  login: (email: string, password: string) => Promise<{ ok: boolean; msg?: string; isAdmin?: boolean }>;
+  logout: () => Promise<void>;
+  updateProfile: (patch: Partial<User>) => Promise<{ ok: boolean; msg?: string }>;
+  refreshAdminUsers: () => Promise<void>;
   placeOrder: (data: { address: string; phone: string; muhallah: string; paymentMethod: "cod" | "easypaisa"; location?: { lat: number; lng: number } | null }) => Order;
   updateOrderStatus: (id: string, status: Order["status"]) => void;
   addProduct: (p: Omit<Product, "id">) => void;
@@ -46,32 +49,19 @@ interface StoreState {
 const StoreCtx = createContext<StoreState | null>(null);
 
 const KEY = "gilgitify_v1";
-type Persisted = { cart: CartItem[]; user: User | null; users: (User & { password: string })[]; orders: Order[]; products: Product[] };
+type Persisted = { cart: CartItem[]; orders: Order[]; products: Product[] };
 
-const ADMIN_EMAIL = "admin@gilgitify.pk";
-const ADMIN_PASSWORD = "admin123";
-const ADMIN_USER: User & { password: string } = {
-  id: "admin",
-  name: "Admin",
-  email: ADMIN_EMAIL,
-  password: ADMIN_PASSWORD,
-  isAdmin: true,
+type ProfileRow = {
+  user_id: string;
+  display_name: string | null;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
 };
 
 function normalize(data?: Partial<Persisted>): Persisted {
-  const users = Array.isArray(data?.users) ? data.users : [];
-  const hasAdmin = users.some(u => u.email?.toLowerCase() === ADMIN_EMAIL);
-  const normalizedUsers = hasAdmin
-    ? users.map(u => u.email?.toLowerCase() === ADMIN_EMAIL ? { ...u, ...ADMIN_USER, id: u.id || ADMIN_USER.id } : u)
-    : [ADMIN_USER, ...users];
-  const currentUser = data?.user?.email?.toLowerCase() === ADMIN_EMAIL
-    ? { id: data.user.id || ADMIN_USER.id, name: data.user.name || ADMIN_USER.name, email: ADMIN_EMAIL, isAdmin: true }
-    : data?.user ?? null;
-
   return {
     cart: Array.isArray(data?.cart) ? data.cart : [],
-    user: currentUser,
-    users: normalizedUsers,
     orders: Array.isArray(data?.orders) ? data.orders : [],
     products: Array.isArray(data?.products) ? data.products : seedProducts,
   };
@@ -81,14 +71,114 @@ function load(): Persisted {
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) return normalize(JSON.parse(raw));
-  } catch {}
+  } catch {
+    // Ignore corrupted local cart/order/product cache.
+  }
   return normalize();
+}
+
+const toUser = (profile: ProfileRow, fallbackEmail = "", isAdmin = false): User => ({
+  id: profile.user_id,
+  name: profile.display_name || profile.email || fallbackEmail || "Customer",
+  email: profile.email || fallbackEmail,
+  phone: profile.phone || undefined,
+  address: profile.address || undefined,
+  isAdmin,
+});
+
+async function loadCurrentUser(authUserId: string, fallbackEmail = ""): Promise<User | null> {
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("user_id, display_name, email, phone, address")
+    .eq("user_id", authUserId)
+    .maybeSingle();
+
+  const { data: roles } = await supabase
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", authUserId);
+
+  const isAdmin = roles?.some(role => role.role === "admin") ?? false;
+
+  if (profile) return toUser(profile, fallbackEmail, isAdmin);
+
+  const { data: createdProfile } = await supabase
+    .from("profiles")
+    .insert({ user_id: authUserId, display_name: fallbackEmail, email: fallbackEmail })
+    .select("user_id, display_name, email, phone, address")
+    .maybeSingle();
+
+  return createdProfile ? toUser(createdProfile, fallbackEmail, isAdmin) : null;
 }
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<Persisted>(load);
+  const [user, setUser] = useState<User | null>(null);
+  const [users, setUsers] = useState<User[]>([]);
+  const [authLoading, setAuthLoading] = useState(true);
 
   useEffect(() => { localStorage.setItem(KEY, JSON.stringify(state)); }, [state]);
+
+  const refreshAdminUsers = useCallback(async () => {
+    const { data: profiles, error } = await supabase
+      .from("profiles")
+      .select("user_id, display_name, email, phone, address")
+      .order("created_at", { ascending: false });
+
+    if (error || !profiles) {
+      setUsers([]);
+      return;
+    }
+
+    setUsers(profiles.map(profile => toUser(profile)));
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const syncSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) {
+        if (mounted) {
+          setUser(null);
+          setUsers([]);
+          setAuthLoading(false);
+        }
+        return;
+      }
+
+      const nextUser = await loadCurrentUser(session.user.id, session.user.email || "");
+      if (!mounted) return;
+      setUser(nextUser);
+      setAuthLoading(false);
+      if (nextUser?.isAdmin) await refreshAdminUsers();
+    };
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthLoading(true);
+      if (!session?.user) {
+        setUser(null);
+        setUsers([]);
+        setAuthLoading(false);
+        return;
+      }
+
+      setTimeout(async () => {
+        const nextUser = await loadCurrentUser(session.user.id, session.user.email || "");
+        if (!mounted) return;
+        setUser(nextUser);
+        setAuthLoading(false);
+        if (nextUser?.isAdmin) await refreshAdminUsers();
+      }, 0);
+    });
+
+    syncSession();
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, [refreshAdminUsers]);
 
   const addToCart = useCallback((product: Product, qty = 1) => {
     setState(s => {
@@ -104,27 +194,66 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const updateQty = (id: string, qty: number) => setState(s => ({ ...s, cart: s.cart.map(c => c.product.id === id ? { ...c, qty: Math.max(1, qty) } : c) }));
   const clearCart = () => setState(s => ({ ...s, cart: [] }));
 
-  const signup = (name: string, email: string, password: string) => {
-    if (state.users.some(u => u.email === email)) return { ok: false, msg: "Email already registered" };
-    const user: User & { password: string } = { id: crypto.randomUUID(), name, email, password };
-    setState(s => ({ ...s, users: [...s.users, user], user: { id: user.id, name, email } }));
-    return { ok: true };
+  const signup: StoreState["signup"] = async (name, email, password) => {
+    const cleanName = name.trim();
+    const cleanEmail = email.trim().toLowerCase();
+    const { data, error } = await supabase.auth.signUp({
+      email: cleanEmail,
+      password,
+      options: {
+        emailRedirectTo: window.location.origin,
+        data: { display_name: cleanName },
+      },
+    });
+
+    if (error) return { ok: false, msg: error.message };
+
+    if (data.user) {
+      await supabase
+        .from("profiles")
+        .upsert({ user_id: data.user.id, display_name: cleanName, email: cleanEmail }, { onConflict: "user_id" });
+    }
+
+    return { ok: true, msg: data.session ? "Account created." : "Account created. Check your email to verify it before logging in." };
   };
 
-  const login = (email: string, password: string) => {
-    const u = state.users.find(x => x.email === email && (x as any).password === password);
-    if (!u) return { ok: false, msg: "Invalid email or password" };
-    setState(s => ({ ...s, user: { id: u.id, name: u.name, email: u.email, phone: u.phone, address: u.address, isAdmin: u.isAdmin } }));
-    return { ok: true };
+  const login: StoreState["login"] = async (email, password) => {
+    const cleanEmail = email.trim().toLowerCase();
+    const { data, error } = await supabase.auth.signInWithPassword({ email: cleanEmail, password });
+    if (error || !data.user) return { ok: false, msg: "Invalid email or password" };
+
+    const nextUser = await loadCurrentUser(data.user.id, data.user.email || cleanEmail);
+    setUser(nextUser);
+    if (nextUser?.isAdmin) await refreshAdminUsers();
+    return { ok: true, isAdmin: Boolean(nextUser?.isAdmin) };
   };
 
-  const logout = () => setState(s => ({ ...s, user: null }));
+  const logout = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+    setUsers([]);
+  };
 
-  const updateProfile = (patch: Partial<User>) => setState(s => s.user ? {
-    ...s,
-    user: { ...s.user, ...patch },
-    users: s.users.map(u => u.id === s.user!.id ? { ...u, ...patch } as any : u),
-  } : s);
+  const updateProfile: StoreState["updateProfile"] = async (patch) => {
+    if (!user) return { ok: false, msg: "You must be logged in." };
+
+    const nextProfile = {
+      user_id: user.id,
+      display_name: patch.name?.trim() || user.name,
+      phone: patch.phone?.trim() || null,
+      address: patch.address?.trim() || null,
+      email: user.email,
+    };
+
+    const { error } = await supabase
+      .from("profiles")
+      .upsert(nextProfile, { onConflict: "user_id" });
+
+    if (error) return { ok: false, msg: "Could not update profile." };
+
+    setUser(s => s ? { ...s, ...patch, name: nextProfile.display_name } : s);
+    return { ok: true };
+  };
 
   const placeOrder: StoreState["placeOrder"] = (data) => {
     const subtotal = state.cart.reduce((sum, c) => sum + c.product.price * c.qty, 0);
@@ -132,8 +261,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const total = subtotal + deliveryFee;
     const order: Order = {
       id: "ORD-" + Date.now().toString(36).toUpperCase(),
-      userId: state.user?.id || "guest",
-      userName: state.user?.name || "Guest",
+      userId: user?.id || "guest",
+      userName: user?.name || "Guest",
       items: state.cart,
       subtotal, deliveryFee, total,
       ...data,
@@ -159,9 +288,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const cartTotal = state.cart.reduce((n, c) => n + c.product.price * c.qty, 0);
 
   const value: StoreState = {
-    products: state.products, cart: state.cart, user: state.user, users: state.users, orders: state.orders,
+    products: state.products, cart: state.cart, user, users, orders: state.orders, authLoading,
     addToCart, removeFromCart, updateQty, clearCart, cartCount, cartTotal,
-    signup, login, logout, updateProfile,
+    signup, login, logout, updateProfile, refreshAdminUsers,
     placeOrder, updateOrderStatus,
     addProduct, updateProduct, deleteProduct,
   };
