@@ -1,8 +1,13 @@
+// Admin auth: tries the Hostinger PHP API first; falls back to a local file
+// (public/data/admin.json) + per-device localStorage override when no PHP.
+
 const SESSION_KEY = "gilgitify_admin_session_v1";
 const OVERRIDE_KEY = "gilgitify_admin_override_v1";
 const RESET_KEY = "gilgitify_admin_reset_v1";
 
-const ADMIN_FILE = `${import.meta.env.BASE_URL}data/admin.json`;
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+const API_AUTH = `${BASE}/api/auth.php`;
+const ADMIN_FILE = `${BASE}/data/admin.json`;
 
 interface AdminFile {
   email: string;
@@ -11,17 +16,39 @@ interface AdminFile {
 
 const FALLBACK: AdminFile = {
   email: "zahidali151272@gmail.com",
+  // SHA-256 of "Zahid.313"
   passwordHash: "c9fc6420ab775dc6d8ad8c82e3c1a545696162e7b17cd7bf9d860263db27f05b",
 };
 
+let apiAvailable: boolean | null = null;
 let cached: AdminFile | null = null;
 
-async function loadAdmin(): Promise<AdminFile> {
-  // Per-device override beats the repo file. (Lets you change the password
-  // on this device without editing the file in GitHub.)
+async function callApi(action: string, body?: unknown): Promise<unknown | null> {
+  try {
+    const init: RequestInit = body
+      ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
+      : { method: "GET", cache: "no-store" };
+    const res = await fetch(`${API_AUTH}?action=${action}`, init);
+    if (!res.ok) return null;
+    const ct = res.headers.get("content-type") || "";
+    if (!ct.includes("json")) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+async function probeApi(): Promise<boolean> {
+  if (apiAvailable !== null) return apiAvailable;
+  const data = await callApi("email") as { email?: string } | null;
+  apiAvailable = Boolean(data && typeof data.email === "string");
+  return apiAvailable;
+}
+
+async function loadAdminFile(): Promise<AdminFile> {
   const override = localStorage.getItem(OVERRIDE_KEY);
   if (override) {
-    try { return JSON.parse(override); } catch { /* ignore corrupt override */ }
+    try { return JSON.parse(override) as AdminFile; } catch { /* ignore */ }
   }
   if (cached) return cached;
   try {
@@ -31,7 +58,7 @@ async function loadAdmin(): Promise<AdminFile> {
       cached = data;
       return data;
     }
-  } catch { /* fall through to baked-in fallback */ }
+  } catch { /* ignore */ }
   cached = FALLBACK;
   return FALLBACK;
 }
@@ -42,76 +69,87 @@ async function sha256(text: string): Promise<string> {
 }
 
 export async function fetchAdminEmail(): Promise<string> {
-  const a = await loadAdmin();
-  return a.email;
+  if (await probeApi()) {
+    const data = await callApi("email") as { email?: string } | null;
+    if (data?.email) {
+      localStorage.setItem("gilgitify_admin_email_cache", data.email);
+      return data.email;
+    }
+  }
+  return (await loadAdminFile()).email;
 }
 
 export function getCachedAdminEmail(): string {
-  const override = localStorage.getItem(OVERRIDE_KEY);
-  if (override) {
-    try { return (JSON.parse(override) as AdminFile).email; } catch { /* ignore */ }
-  }
-  return cached?.email || FALLBACK.email;
+  return localStorage.getItem("gilgitify_admin_email_cache")
+    || (() => {
+        const ov = localStorage.getItem(OVERRIDE_KEY);
+        if (ov) { try { return (JSON.parse(ov) as AdminFile).email; } catch { /* ignore */ } }
+        return cached?.email || FALLBACK.email;
+      })();
 }
 
 export async function verifyAdminLogin(email: string, password: string): Promise<boolean> {
-  const a = await loadAdmin();
+  if (await probeApi()) {
+    const data = await callApi("verify", { email, password }) as { ok?: boolean } | null;
+    return Boolean(data?.ok);
+  }
+  const a = await loadAdminFile();
   const hash = await sha256(password);
   return email.trim().toLowerCase() === a.email.toLowerCase() && hash === a.passwordHash;
 }
 
-function saveOverride(next: AdminFile) {
+export async function changeAdminEmail(currentPassword: string, newEmail: string): Promise<boolean> {
+  if (await probeApi()) {
+    const data = await callApi("updateEmail", { currentPassword, newEmail }) as { ok?: boolean } | null;
+    if (data?.ok) localStorage.setItem("gilgitify_admin_email_cache", newEmail);
+    return Boolean(data?.ok);
+  }
+  const a = await loadAdminFile();
+  if ((await sha256(currentPassword)) !== a.passwordHash) return false;
+  const next = { ...a, email: newEmail };
   localStorage.setItem(OVERRIDE_KEY, JSON.stringify(next));
   cached = next;
-}
-
-export async function changeAdminEmail(currentPassword: string, newEmail: string): Promise<boolean> {
-  const a = await loadAdmin();
-  const hash = await sha256(currentPassword);
-  if (hash !== a.passwordHash) return false;
-  saveOverride({ ...a, email: newEmail });
   return true;
 }
 
 export async function changeAdminPassword(currentPassword: string, newPassword: string): Promise<boolean> {
-  const a = await loadAdmin();
-  const hash = await sha256(currentPassword);
-  if (hash !== a.passwordHash) return false;
-  const newHash = await sha256(newPassword);
-  saveOverride({ ...a, passwordHash: newHash });
+  if (await probeApi()) {
+    const data = await callApi("updatePassword", { currentPassword, newPassword }) as { ok?: boolean } | null;
+    return Boolean(data?.ok);
+  }
+  const a = await loadAdminFile();
+  if ((await sha256(currentPassword)) !== a.passwordHash) return false;
+  const next = { ...a, passwordHash: await sha256(newPassword) };
+  localStorage.setItem(OVERRIDE_KEY, JSON.stringify(next));
+  cached = next;
   return true;
 }
 
-export async function getProposedAdminFile(email: string, password: string): Promise<AdminFile> {
-  return { email, passwordHash: await sha256(password) };
-}
-
-interface ResetEntry { code: string; expires: number; }
-
-export function generateCode(): string {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-}
-
-export function saveResetCode(code: string, ttlMinutes = 15) {
-  const entry: ResetEntry = { code, expires: Date.now() + ttlMinutes * 60_000 };
-  localStorage.setItem(RESET_KEY, JSON.stringify(entry));
-}
-
-export async function requestAdminResetCode(): Promise<string> {
-  const code = generateCode();
-  saveResetCode(code);
+export async function requestAdminResetCode(): Promise<string | null> {
+  if (await probeApi()) {
+    const data = await callApi("requestReset") as { code?: string } | null;
+    return data?.code || null;
+  }
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  localStorage.setItem(RESET_KEY, JSON.stringify({ code, expires: Date.now() + 15 * 60_000 }));
   return code;
 }
 
 export async function consumeAdminResetCode(input: string, newPassword: string): Promise<boolean> {
+  if (await probeApi()) {
+    const data = await callApi("consumeReset", { code: input.trim(), newPassword }) as { ok?: boolean } | null;
+    return Boolean(data?.ok);
+  }
   try {
     const raw = localStorage.getItem(RESET_KEY);
     if (!raw) return false;
-    const entry: ResetEntry = JSON.parse(raw);
+    const entry = JSON.parse(raw) as { code: string; expires: number };
     if (entry.expires < Date.now() || entry.code !== input.trim()) return false;
     localStorage.removeItem(RESET_KEY);
-    const a = await loadAdmin();
-    saveOverride({ ...a, passwordHash: await sha256(newPassword) });
+    const a = await loadAdminFile();
+    const next = { ...a, passwordHash: await sha256(newPassword) };
+    localStorage.setItem(OVERRIDE_KEY, JSON.stringify(next));
+    cached = next;
     return true;
   } catch {
     return false;
@@ -168,4 +206,13 @@ export async function sendResetEmail(toEmail: string, code: string): Promise<boo
     `Your Gilgitify admin password reset code is: ${code}\n\nThis code expires in 15 minutes. If you did not request this, please ignore this email.`,
     { code }
   );
+}
+
+// Backwards-compat helper for callers that still expect the synchronous reset-code API.
+export function generateCode(): string {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+export function saveResetCode(code: string, ttlMinutes = 15) {
+  localStorage.setItem(RESET_KEY, JSON.stringify({ code, expires: Date.now() + ttlMinutes * 60_000 }));
 }

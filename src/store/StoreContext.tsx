@@ -113,41 +113,42 @@ async function loadCurrentUser(authUserId: string, fallbackEmail = ""): Promise<
   return createdProfile ? toUser(createdProfile, fallbackEmail, isAdmin) : null;
 }
 
-type OrderRow = {
-  id: string;
-  user_id: string | null;
-  user_name: string;
-  email: string | null;
-  phone: string;
-  address: string;
-  muhallah: string | null;
-  payment_method: "cod" | "easypaisa";
-  status: Order["status"];
-  items: CartItem[];
-  subtotal: number;
-  delivery_fee: number;
-  total: number;
-  location: { lat: number; lng: number } | null;
-  created_at: string;
-};
+const API_ORDERS = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/api/orders.php`;
 
-const rowToOrder = (r: OrderRow): Order => ({
-  id: r.id,
-  userId: r.user_id || "guest",
-  userName: r.user_name,
-  email: r.email || undefined,
-  items: r.items,
-  subtotal: Number(r.subtotal),
-  deliveryFee: Number(r.delivery_fee),
-  total: Number(r.total),
-  address: r.address,
-  phone: r.phone,
-  muhallah: r.muhallah || "",
-  paymentMethod: r.payment_method,
-  status: r.status,
-  createdAt: r.created_at,
-  location: r.location,
-});
+async function apiGetOrders(): Promise<Order[] | null> {
+  try {
+    const res = await fetch(API_ORDERS, { cache: "no-store" });
+    if (!res.ok) return null;
+    const ct = res.headers.get("content-type") || "";
+    if (!ct.includes("json")) return null;
+    const data = await res.json() as { orders?: Order[] };
+    return Array.isArray(data.orders) ? data.orders : [];
+  } catch {
+    return null;
+  }
+}
+
+async function apiCreateOrder(order: Order): Promise<boolean> {
+  try {
+    const res = await fetch(API_ORDERS, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(order),
+    });
+    return res.ok;
+  } catch { return false; }
+}
+
+async function apiUpdateOrderStatus(id: string, status: Order["status"]): Promise<boolean> {
+  try {
+    const res = await fetch(API_ORDERS, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, status }),
+    });
+    return res.ok;
+  } catch { return false; }
+}
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<Persisted>(load);
@@ -157,27 +158,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { localStorage.setItem(KEY, JSON.stringify(state)); }, [state]);
 
-  // Pull orders from Supabase and keep them live for every browser/device.
+  // Sync orders from the Hostinger PHP API. When the API isn't reachable
+  // (GitHub Pages, no PHP) we silently keep using the localStorage cache.
   useEffect(() => {
     let cancelled = false;
     const fetchOrders = async () => {
-      const { data, error } = await (supabase.from("orders" as never) as never)
-        .select("*")
-        .order("created_at", { ascending: false }) as unknown as { data: OrderRow[] | null; error: unknown };
-      if (cancelled || error || !data) return;
-      const remoteOrders = data.map(rowToOrder);
-      setState(s => ({ ...s, orders: remoteOrders }));
+      const remote = await apiGetOrders();
+      if (cancelled || !remote) return;
+      setState(s => ({ ...s, orders: remote }));
     };
     fetchOrders();
-    const channel = supabase
-      .channel("orders-realtime")
-      .on(
-        "postgres_changes" as never,
-        { event: "*", schema: "public", table: "orders" },
-        () => { fetchOrders(); }
-      )
-      .subscribe();
-    return () => { cancelled = true; supabase.removeChannel(channel); };
+    const id = window.setInterval(fetchOrders, 8000);
+    const onFocus = () => fetchOrders();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+      window.removeEventListener("focus", onFocus);
+    };
   }, []);
 
   const refreshAdminUsers = useCallback(async () => {
@@ -338,28 +336,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // Optimistic local update + clear cart immediately.
     setState(s => ({ ...s, orders: [order, ...s.orders], cart: [] }));
 
-    // Persist to Supabase so admin (on any device) sees it.
-    (async () => {
-      const row = {
-        id: order.id,
-        user_id: user?.id || null,
-        user_name: order.userName,
-        email: order.email || null,
-        phone: order.phone,
-        address: order.address,
-        muhallah: order.muhallah || null,
-        payment_method: order.paymentMethod,
-        status: order.status,
-        items: order.items,
-        subtotal: order.subtotal,
-        delivery_fee: order.deliveryFee,
-        total: order.total,
-        location: order.location,
-        created_at: order.createdAt,
-      };
-      const { error } = await (supabase.from("orders" as never) as never).insert(row) as unknown as { error: unknown };
-      if (error) console.error("Order sync failed", error);
-    })();
+    // Persist to the Hostinger PHP API so admin sees it from any device.
+    apiCreateOrder(order).catch(() => { /* silent: localStorage already has it */ });
 
     const itemsList = order.items.map(i => `• ${i.product.name} × ${i.qty} — Rs. ${i.product.price * i.qty}`).join("\n");
     const mapLink = order.location ? `\nMap: https://www.google.com/maps?q=${order.location.lat},${order.location.lng}` : "";
@@ -375,12 +353,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const updateOrderStatus = (id: string, status: Order["status"]) => {
     setState(s => ({ ...s, orders: s.orders.map(o => o.id === id ? { ...o, status } : o) }));
     const o = state.orders.find(x => x.id === id);
-    (async () => {
-      const { error } = await (supabase.from("orders" as never) as never)
-        .update({ status })
-        .eq("id", id) as unknown as { error: unknown };
-      if (error) console.error("Order status sync failed", error);
-    })();
+    apiUpdateOrderStatus(id, status).catch(() => { /* silent */ });
     if (o) notifyAdmin(
       `Order ${id} → ${status}`,
       `Order ${id} for ${o.userName} (${o.phone}) was updated to status: ${status}.`,

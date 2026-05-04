@@ -4,7 +4,11 @@ import path from "path";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
-  base: mode === "production" ? "/gilgitify-marketplace-86/" : "/",
+  // VITE_DEPLOY_TARGET=pages gives the repo-name base needed for GitHub Pages.
+  // Default (Hostinger / local) uses "/" so the API at /api/*.php is reachable.
+  base: process.env.VITE_DEPLOY_TARGET === "pages"
+    ? "/gilgitify-marketplace-86/"
+    : "/",
   server: {
     host: "::",
     port: 8080,

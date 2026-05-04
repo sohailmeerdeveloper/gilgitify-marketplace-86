@@ -1,0 +1,7 @@
+# Allow PHP execution in this folder. Block direct access to internal data dir.
+<Files "bootstrap.php">
+  Require all denied
+</Files>
+
+RewriteEngine On
+RewriteRule ^data(/|$) - [F,L]
