@@ -9,9 +9,9 @@ import { toast } from "sonner";
 
 const Profile = () => {
   const { user, updateProfile, logout, orders } = useStore();
+  const [form, setForm] = useState({ name: user?.name || "", phone: user?.phone || "", address: user?.address || "" });
   if (!user) return <Navigate to="/login" replace />;
   const myOrders = orders.filter(o => o.userId === user.id);
-  const [form, setForm] = useState({ name: user.name, phone: user.phone || "", address: user.address || "" });
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();

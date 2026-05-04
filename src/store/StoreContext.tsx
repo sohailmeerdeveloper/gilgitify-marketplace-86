@@ -43,15 +43,17 @@ interface StoreState {
   refreshAdminUsers: () => Promise<void>;
   placeOrder: (data: { name: string; email?: string; address: string; phone: string; muhallah: string; paymentMethod: "cod" | "easypaisa"; location?: { lat: number; lng: number } | null }) => Order;
   updateOrderStatus: (id: string, status: Order["status"]) => void;
-  addProduct: (p: Omit<Product, "id">) => void;
-  updateProduct: (id: string, patch: Partial<Product>) => void;
-  deleteProduct: (id: string) => void;
+  addProduct: (p: Omit<Product, "id">) => Promise<ProductMutationResult>;
+  updateProduct: (id: string, patch: Partial<Product>) => Promise<ProductMutationResult>;
+  deleteProduct: (id: string) => Promise<ProductMutationResult>;
 }
 
 const StoreCtx = createContext<StoreState | null>(null);
 
 const KEY = "gilgitify_v1";
 type Persisted = { cart: CartItem[]; orders: Order[]; products: Product[] };
+type ProductMutationResult = { ok: boolean; synced: boolean };
+type ApiWriteResult = boolean | null;
 
 type ProfileRow = {
   user_id: string;
@@ -113,7 +115,9 @@ async function loadCurrentUser(authUserId: string, fallbackEmail = ""): Promise<
   return createdProfile ? toUser(createdProfile, fallbackEmail, isAdmin) : null;
 }
 
-const API_ORDERS = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/api/orders.php`;
+const API_BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+const API_ORDERS = `${API_BASE}/api/orders.php`;
+const API_PRODUCTS = `${API_BASE}/api/products.php`;
 
 async function apiGetOrders(): Promise<Order[] | null> {
   try {
@@ -150,6 +154,70 @@ async function apiUpdateOrderStatus(id: string, status: Order["status"]): Promis
   } catch { return false; }
 }
 
+async function apiGetProducts(): Promise<Product[] | null> {
+  try {
+    const res = await fetch(API_PRODUCTS, { cache: "no-store" });
+    if (!res.ok) return null;
+    const ct = res.headers.get("content-type") || "";
+    if (!ct.includes("json")) return null;
+    const data = await res.json() as { products?: Product[] };
+    return Array.isArray(data.products) ? data.products : [];
+  } catch {
+    return null;
+  }
+}
+
+async function readProductWrite(res: Response): Promise<ApiWriteResult> {
+  if (!res.ok) return false;
+  const ct = res.headers.get("content-type") || "";
+  if (!ct.includes("json")) return null;
+  const data = await res.json() as { ok?: boolean };
+  return data.ok !== false;
+}
+
+async function apiSaveProduct(product: Product): Promise<ApiWriteResult> {
+  try {
+    const res = await fetch(API_PRODUCTS, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(product),
+    });
+    return readProductWrite(res);
+  } catch {
+    return null;
+  }
+}
+
+async function apiUpdateProduct(id: string, patch: Partial<Product>): Promise<ApiWriteResult> {
+  try {
+    const res = await fetch(API_PRODUCTS, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, ...patch }),
+    });
+    return readProductWrite(res);
+  } catch {
+    return null;
+  }
+}
+
+async function apiDeleteProduct(id: string): Promise<ApiWriteResult> {
+  try {
+    const res = await fetch(`${API_PRODUCTS}?id=${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: { Accept: "application/json" },
+    });
+    return readProductWrite(res);
+  } catch {
+    return null;
+  }
+}
+
+const productMutationResult = (result: ApiWriteResult): ProductMutationResult => ({
+  ok: result !== false,
+  synced: result === true,
+});
+
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<Persisted>(load);
   const [user, setUser] = useState<User | null>(null);
@@ -170,6 +238,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     fetchOrders();
     const id = window.setInterval(fetchOrders, 8000);
     const onFocus = () => fetchOrders();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, []);
+
+  // Sync products from the Hostinger PHP API so admin product changes
+  // become visible to every shopper, not just the admin's browser.
+  useEffect(() => {
+    let cancelled = false;
+    const fetchProducts = async () => {
+      const remote = await apiGetProducts();
+      if (cancelled || !remote) return;
+      setState(s => ({ ...s, products: remote }));
+    };
+    fetchProducts();
+    const id = window.setInterval(fetchProducts, 8000);
+    const onFocus = () => fetchProducts();
     window.addEventListener("focus", onFocus);
     return () => {
       cancelled = true;
@@ -361,12 +449,55 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     );
   };
 
-  const addProduct = (p: Omit<Product, "id">) =>
-    setState(s => ({ ...s, products: [{ ...p, id: "p" + Date.now() }, ...s.products] }));
-  const updateProduct = (id: string, patch: Partial<Product>) =>
+  const addProduct: StoreState["addProduct"] = async (p) => {
+    const product: Product = { ...p, id: `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}` };
+    setState(s => ({ ...s, products: [product, ...s.products] }));
+
+    const synced = await apiSaveProduct(product);
+    if (synced === false) {
+      setState(s => ({ ...s, products: s.products.filter(item => item.id !== product.id) }));
+    } else if (synced === true) {
+      const remote = await apiGetProducts();
+      if (remote) setState(s => ({ ...s, products: remote }));
+    }
+
+    return productMutationResult(synced);
+  };
+
+  const updateProduct: StoreState["updateProduct"] = async (id, patch) => {
+    const previous = state.products.find(p => p.id === id);
     setState(s => ({ ...s, products: s.products.map(p => p.id === id ? { ...p, ...patch } : p) }));
-  const deleteProduct = (id: string) =>
+
+    const synced = await apiUpdateProduct(id, patch);
+    if (synced === false && previous) {
+      setState(s => ({ ...s, products: s.products.map(p => p.id === id ? previous : p) }));
+    } else if (synced === true) {
+      const remote = await apiGetProducts();
+      if (remote) setState(s => ({ ...s, products: remote }));
+    }
+
+    return productMutationResult(synced);
+  };
+
+  const deleteProduct: StoreState["deleteProduct"] = async (id) => {
+    const previousIndex = state.products.findIndex(p => p.id === id);
+    const previous = previousIndex >= 0 ? state.products[previousIndex] : undefined;
     setState(s => ({ ...s, products: s.products.filter(p => p.id !== id) }));
+
+    const synced = await apiDeleteProduct(id);
+    if (synced === false && previous) {
+      setState(s => {
+        const products = [...s.products];
+        products.splice(Math.min(previousIndex, products.length), 0, previous);
+        return { ...s, products };
+      });
+    } else if (synced === true) {
+      const remote = await apiGetProducts();
+      if (remote) setState(s => ({ ...s, products: remote }));
+    }
+
+    return productMutationResult(synced);
+  };
 
   const cartCount = state.cart.reduce((n, c) => n + c.qty, 0);
   const cartTotal = state.cart.reduce((n, c) => n + c.product.price * c.qty, 0);

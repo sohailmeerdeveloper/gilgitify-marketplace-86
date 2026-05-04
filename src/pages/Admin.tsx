@@ -166,6 +166,7 @@ const Dashboard = ({ onLogout }: DashProps) => {
   const [editing, setEditing] = useState<Product | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<Omit<Product, "id">>(empty);
+  const [productBusy, setProductBusy] = useState(false);
 
   const newOrders = orders.filter(o => o.status === "pending").length;
   const inQueue = orders.filter(o => ["pending", "preparing", "out_for_delivery"].includes(o.status)).length;
@@ -204,10 +205,21 @@ const Dashboard = ({ onLogout }: DashProps) => {
 
   const openNew = () => { setEditing(null); setForm(empty); setShowForm(true); };
   const openEdit = (p: Product) => { setEditing(p); setForm(p); setShowForm(true); };
-  const save = (e: React.FormEvent) => {
+  const save = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (editing) { updateProduct(editing.id, form); toast.success("Product updated"); }
-    else { addProduct(form); toast.success("Product added"); }
+    setProductBusy(true);
+    const result = editing ? await updateProduct(editing.id, form) : await addProduct(form);
+    setProductBusy(false);
+
+    if (!result.ok) {
+      toast.error("Could not save product. Please try again.");
+      return;
+    }
+
+    const action = editing ? "updated" : "added";
+    toast.success(result.synced
+      ? `Product ${action}`
+      : `Product ${action} locally. PHP API is unavailable, so it may not sync to other users yet.`);
     setShowForm(false);
   };
 
@@ -314,7 +326,21 @@ const Dashboard = ({ onLogout }: DashProps) => {
                     <div className="text-xs text-muted-foreground">Stock: {p.stock}</div>
                     <div className="flex gap-1 mt-2">
                       <Button size="sm" variant="outline" onClick={() => openEdit(p)}><Edit className="w-3 h-3" /></Button>
-                      <Button size="sm" variant="destructive" onClick={() => { if (confirm("Delete?")) { deleteProduct(p.id); toast.success("Deleted"); } }}><Trash2 className="w-3 h-3" /></Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        disabled={productBusy}
+                        onClick={async () => {
+                          if (!confirm("Delete?")) return;
+                          setProductBusy(true);
+                          const result = await deleteProduct(p.id);
+                          setProductBusy(false);
+                          if (!result.ok) return toast.error("Could not delete product. Please try again.");
+                          toast.success(result.synced
+                            ? "Product deleted"
+                            : "Product deleted locally. PHP API is unavailable, so it may not sync to other users yet.");
+                        }}
+                      ><Trash2 className="w-3 h-3" /></Button>
                     </div>
                   </div>
                 </div>
@@ -348,7 +374,9 @@ const Dashboard = ({ onLogout }: DashProps) => {
                     <Input className="mt-2" placeholder="or paste image URL" value={form.image} onChange={e => setForm({ ...form, image: e.target.value })} />
                     {form.image && <img src={form.image} alt="" className="w-24 h-24 rounded-lg object-cover mt-2" />}
                   </div>
-                  <Button type="submit" className="w-full rounded-full">{editing ? "Update" : "Add"} Product</Button>
+                  <Button type="submit" className="w-full rounded-full" disabled={productBusy}>
+                    {productBusy ? "Saving..." : `${editing ? "Update" : "Add"} Product`}
+                  </Button>
                 </form>
               </div>
             )}
