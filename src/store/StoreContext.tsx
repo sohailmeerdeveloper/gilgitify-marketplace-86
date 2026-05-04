@@ -113,6 +113,42 @@ async function loadCurrentUser(authUserId: string, fallbackEmail = ""): Promise<
   return createdProfile ? toUser(createdProfile, fallbackEmail, isAdmin) : null;
 }
 
+type OrderRow = {
+  id: string;
+  user_id: string | null;
+  user_name: string;
+  email: string | null;
+  phone: string;
+  address: string;
+  muhallah: string | null;
+  payment_method: "cod" | "easypaisa";
+  status: Order["status"];
+  items: CartItem[];
+  subtotal: number;
+  delivery_fee: number;
+  total: number;
+  location: { lat: number; lng: number } | null;
+  created_at: string;
+};
+
+const rowToOrder = (r: OrderRow): Order => ({
+  id: r.id,
+  userId: r.user_id || "guest",
+  userName: r.user_name,
+  email: r.email || undefined,
+  items: r.items,
+  subtotal: Number(r.subtotal),
+  deliveryFee: Number(r.delivery_fee),
+  total: Number(r.total),
+  address: r.address,
+  phone: r.phone,
+  muhallah: r.muhallah || "",
+  paymentMethod: r.payment_method,
+  status: r.status,
+  createdAt: r.created_at,
+  location: r.location,
+});
+
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<Persisted>(load);
   const [user, setUser] = useState<User | null>(null);
@@ -120,6 +156,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [authLoading, setAuthLoading] = useState(true);
 
   useEffect(() => { localStorage.setItem(KEY, JSON.stringify(state)); }, [state]);
+
+  // Pull orders from Supabase and keep them live for every browser/device.
+  useEffect(() => {
+    let cancelled = false;
+    const fetchOrders = async () => {
+      const { data, error } = await (supabase.from("orders" as never) as never)
+        .select("*")
+        .order("created_at", { ascending: false }) as unknown as { data: OrderRow[] | null; error: unknown };
+      if (cancelled || error || !data) return;
+      const remoteOrders = data.map(rowToOrder);
+      setState(s => ({ ...s, orders: remoteOrders }));
+    };
+    fetchOrders();
+    const channel = supabase
+      .channel("orders-realtime")
+      .on(
+        "postgres_changes" as never,
+        { event: "*", schema: "public", table: "orders" },
+        () => { fetchOrders(); }
+      )
+      .subscribe();
+    return () => { cancelled = true; supabase.removeChannel(channel); };
+  }, []);
 
   const refreshAdminUsers = useCallback(async () => {
     const { data: profiles, error } = await supabase
@@ -276,7 +335,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       createdAt: new Date().toISOString(),
       location: data.location ?? null,
     };
+    // Optimistic local update + clear cart immediately.
     setState(s => ({ ...s, orders: [order, ...s.orders], cart: [] }));
+
+    // Persist to Supabase so admin (on any device) sees it.
+    (async () => {
+      const row = {
+        id: order.id,
+        user_id: user?.id || null,
+        user_name: order.userName,
+        email: order.email || null,
+        phone: order.phone,
+        address: order.address,
+        muhallah: order.muhallah || null,
+        payment_method: order.paymentMethod,
+        status: order.status,
+        items: order.items,
+        subtotal: order.subtotal,
+        delivery_fee: order.deliveryFee,
+        total: order.total,
+        location: order.location,
+        created_at: order.createdAt,
+      };
+      const { error } = await (supabase.from("orders" as never) as never).insert(row) as unknown as { error: unknown };
+      if (error) console.error("Order sync failed", error);
+    })();
 
     const itemsList = order.items.map(i => `• ${i.product.name} × ${i.qty} — Rs. ${i.product.price * i.qty}`).join("\n");
     const mapLink = order.location ? `\nMap: https://www.google.com/maps?q=${order.location.lat},${order.location.lng}` : "";
@@ -292,6 +375,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const updateOrderStatus = (id: string, status: Order["status"]) => {
     setState(s => ({ ...s, orders: s.orders.map(o => o.id === id ? { ...o, status } : o) }));
     const o = state.orders.find(x => x.id === id);
+    (async () => {
+      const { error } = await (supabase.from("orders" as never) as never)
+        .update({ status })
+        .eq("id", id) as unknown as { error: unknown };
+      if (error) console.error("Order status sync failed", error);
+    })();
     if (o) notifyAdmin(
       `Order ${id} → ${status}`,
       `Order ${id} for ${o.userName} (${o.phone}) was updated to status: ${status}.`,
