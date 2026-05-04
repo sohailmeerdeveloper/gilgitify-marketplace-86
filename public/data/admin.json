@@ -1,0 +1,5 @@
+{
+  "email": "zahidali151272@gmail.com",
+  "passwordHash": "c9fc6420ab775dc6d8ad8c82e3c1a545696162e7b17cd7bf9d860263db27f05b",
+  "_note": "passwordHash is SHA-256 of the password. Default password is 'Zahid.313'. To change permanently for all devices, run the 'Update admin credentials' GitHub Action from the Actions tab — it will rewrite this file safely."
+}

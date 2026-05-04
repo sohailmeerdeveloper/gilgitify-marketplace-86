@@ -1,0 +1,41 @@
+name: Update admin credentials
+
+on:
+  workflow_dispatch:
+    inputs:
+      email:
+        description: "New admin email"
+        required: true
+      password:
+        description: "New admin password (will be SHA-256 hashed before commit; never stored in plain text)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Hash password and write file
+        env:
+          NEW_EMAIL: ${{ inputs.email }}
+          NEW_PASSWORD: ${{ inputs.password }}
+        run: |
+          HASH=$(printf "%s" "$NEW_PASSWORD" | sha256sum | awk '{print $1}')
+          mkdir -p public/data
+          cat > public/data/admin.json <<JSON
+          {
+            "email": "$NEW_EMAIL",
+            "passwordHash": "$HASH",
+            "_note": "passwordHash is SHA-256 of the password. To change for all devices, run the 'Update admin credentials' GitHub Action from the Actions tab."
+          }
+          JSON
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/data/admin.json
+          git commit -m "chore: update admin credentials" || echo "No changes"
+          git push

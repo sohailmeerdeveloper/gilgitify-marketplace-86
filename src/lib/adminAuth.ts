@@ -1,51 +1,121 @@
-import { supabase } from "@/integrations/supabase/client";
-
 const SESSION_KEY = "gilgitify_admin_session_v1";
-const EMAIL_CACHE_KEY = "gilgitify_admin_email_v1";
+const OVERRIDE_KEY = "gilgitify_admin_override_v1";
+const RESET_KEY = "gilgitify_admin_reset_v1";
 
-const DEFAULT_EMAIL = "zahidali151272@gmail.com";
+const ADMIN_FILE = `${import.meta.env.BASE_URL}data/admin.json`;
 
-// Synchronous best-effort email read for UI. Real source of truth is Supabase.
-export function getCachedAdminEmail(): string {
-  return localStorage.getItem(EMAIL_CACHE_KEY) || DEFAULT_EMAIL;
+interface AdminFile {
+  email: string;
+  passwordHash: string;
+}
+
+const FALLBACK: AdminFile = {
+  email: "zahidali151272@gmail.com",
+  passwordHash: "c9fc6420ab775dc6d8ad8c82e3c1a545696162e7b17cd7bf9d860263db27f05b",
+};
+
+let cached: AdminFile | null = null;
+
+async function loadAdmin(): Promise<AdminFile> {
+  // Per-device override beats the repo file. (Lets you change the password
+  // on this device without editing the file in GitHub.)
+  const override = localStorage.getItem(OVERRIDE_KEY);
+  if (override) {
+    try { return JSON.parse(override); } catch { /* ignore corrupt override */ }
+  }
+  if (cached) return cached;
+  try {
+    const res = await fetch(ADMIN_FILE, { cache: "no-store" });
+    if (res.ok) {
+      const data = (await res.json()) as AdminFile;
+      cached = data;
+      return data;
+    }
+  } catch { /* fall through to baked-in fallback */ }
+  cached = FALLBACK;
+  return FALLBACK;
+}
+
+async function sha256(text: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
 export async function fetchAdminEmail(): Promise<string> {
-  const { data, error } = await (supabase.rpc("get_admin_email" as never) as never) as unknown as { data: string | null; error: unknown };
-  if (error || !data) return getCachedAdminEmail();
-  localStorage.setItem(EMAIL_CACHE_KEY, data);
-  return data;
+  const a = await loadAdmin();
+  return a.email;
+}
+
+export function getCachedAdminEmail(): string {
+  const override = localStorage.getItem(OVERRIDE_KEY);
+  if (override) {
+    try { return (JSON.parse(override) as AdminFile).email; } catch { /* ignore */ }
+  }
+  return cached?.email || FALLBACK.email;
 }
 
 export async function verifyAdminLogin(email: string, password: string): Promise<boolean> {
-  const { data, error } = await (supabase.rpc("verify_admin" as never, { input_email: email, input_password: password }) as never) as unknown as { data: boolean | null; error: unknown };
-  if (error) return false;
-  return Boolean(data);
+  const a = await loadAdmin();
+  const hash = await sha256(password);
+  return email.trim().toLowerCase() === a.email.toLowerCase() && hash === a.passwordHash;
+}
+
+function saveOverride(next: AdminFile) {
+  localStorage.setItem(OVERRIDE_KEY, JSON.stringify(next));
+  cached = next;
 }
 
 export async function changeAdminEmail(currentPassword: string, newEmail: string): Promise<boolean> {
-  const { data, error } = await (supabase.rpc("update_admin_email" as never, { input_current_password: currentPassword, input_new_email: newEmail }) as never) as unknown as { data: boolean | null; error: unknown };
-  if (error || !data) return false;
-  localStorage.setItem(EMAIL_CACHE_KEY, newEmail);
+  const a = await loadAdmin();
+  const hash = await sha256(currentPassword);
+  if (hash !== a.passwordHash) return false;
+  saveOverride({ ...a, email: newEmail });
   return true;
 }
 
 export async function changeAdminPassword(currentPassword: string, newPassword: string): Promise<boolean> {
-  const { data, error } = await (supabase.rpc("update_admin_password" as never, { input_current_password: currentPassword, input_new_password: newPassword }) as never) as unknown as { data: boolean | null; error: unknown };
-  if (error) return false;
-  return Boolean(data);
+  const a = await loadAdmin();
+  const hash = await sha256(currentPassword);
+  if (hash !== a.passwordHash) return false;
+  const newHash = await sha256(newPassword);
+  saveOverride({ ...a, passwordHash: newHash });
+  return true;
 }
 
-export async function requestAdminResetCode(): Promise<string | null> {
-  const { data, error } = await (supabase.rpc("request_admin_reset" as never) as never) as unknown as { data: string | null; error: unknown };
-  if (error || !data) return null;
-  return data;
+export async function getProposedAdminFile(email: string, password: string): Promise<AdminFile> {
+  return { email, passwordHash: await sha256(password) };
 }
 
-export async function consumeAdminResetCode(code: string, newPassword: string): Promise<boolean> {
-  const { data, error } = await (supabase.rpc("consume_admin_reset" as never, { input_code: code.trim(), input_new_password: newPassword }) as never) as unknown as { data: boolean | null; error: unknown };
-  if (error) return false;
-  return Boolean(data);
+interface ResetEntry { code: string; expires: number; }
+
+export function generateCode(): string {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+export function saveResetCode(code: string, ttlMinutes = 15) {
+  const entry: ResetEntry = { code, expires: Date.now() + ttlMinutes * 60_000 };
+  localStorage.setItem(RESET_KEY, JSON.stringify(entry));
+}
+
+export async function requestAdminResetCode(): Promise<string> {
+  const code = generateCode();
+  saveResetCode(code);
+  return code;
+}
+
+export async function consumeAdminResetCode(input: string, newPassword: string): Promise<boolean> {
+  try {
+    const raw = localStorage.getItem(RESET_KEY);
+    if (!raw) return false;
+    const entry: ResetEntry = JSON.parse(raw);
+    if (entry.expires < Date.now() || entry.code !== input.trim()) return false;
+    localStorage.removeItem(RESET_KEY);
+    const a = await loadAdmin();
+    saveOverride({ ...a, passwordHash: await sha256(newPassword) });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function isAdminLoggedIn(): boolean {
