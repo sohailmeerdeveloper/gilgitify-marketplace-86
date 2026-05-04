@@ -9,14 +9,16 @@ import { Trash2, Edit, Plus, X, Bell, LogOut, Mail, KeyRound, ShieldCheck, Users
 import { toast } from "sonner";
 import { Product, categories, Category } from "@/data/products";
 import {
-  getAdminCreds,
-  saveAdminCreds,
+  fetchAdminEmail,
+  getCachedAdminEmail,
+  verifyAdminLogin,
+  changeAdminEmail,
+  changeAdminPassword,
+  requestAdminResetCode,
+  consumeAdminResetCode,
   isAdminLoggedIn,
   setAdminSession,
   clearAdminSession,
-  saveResetCode,
-  consumeResetCode,
-  generateCode,
   sendResetEmail,
   notifyAdmin,
   sendFormSubmit,
@@ -36,10 +38,12 @@ const Admin = () => {
   const [newPwd2, setNewPwd2] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    const creds = getAdminCreds();
-    if (loginEmail.trim().toLowerCase() === creds.email.toLowerCase() && loginPwd === creds.password) {
+    setBusy(true);
+    const ok = await verifyAdminLogin(loginEmail.trim(), loginPwd);
+    setBusy(false);
+    if (ok) {
       setAdminSession();
       setAuthed(true);
       toast.success("Welcome back, admin");
@@ -51,26 +55,30 @@ const Admin = () => {
   const handleSendReset = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
-    const creds = getAdminCreds();
-    const code = generateCode();
-    saveResetCode(code);
-    const ok = await sendResetEmail(creds.email, code);
+    const adminEmail = await fetchAdminEmail();
+    const code = await requestAdminResetCode();
+    if (!code) {
+      setBusy(false);
+      return toast.error("Could not start reset. Try again later.");
+    }
+    const sent = await sendResetEmail(adminEmail, code);
     setBusy(false);
-    if (ok) {
-      toast.success(`Reset code sent to ${creds.email}`);
+    if (sent) {
+      toast.success(`Reset code sent to ${adminEmail}`);
       setScreen("reset");
     } else {
       toast.error("Could not send email. Check FormSubmit activation.");
     }
   };
 
-  const handleReset = (e: React.FormEvent) => {
+  const handleReset = async (e: React.FormEvent) => {
     e.preventDefault();
     if (newPwd.length < 4) return toast.error("Password too short");
     if (newPwd !== newPwd2) return toast.error("Passwords do not match");
-    if (!consumeResetCode(resetCode)) return toast.error("Invalid or expired code");
-    const creds = getAdminCreds();
-    saveAdminCreds({ ...creds, password: newPwd });
+    setBusy(true);
+    const ok = await consumeAdminResetCode(resetCode, newPwd);
+    setBusy(false);
+    if (!ok) return toast.error("Invalid or expired code");
     toast.success("Password updated. Please log in.");
     setScreen("login");
     setResetCode(""); setNewPwd(""); setNewPwd2("");
@@ -99,7 +107,7 @@ const Admin = () => {
                   <Label>Password</Label>
                   <Input type="password" required value={loginPwd} onChange={e => setLoginPwd(e.target.value)} />
                 </div>
-                <Button type="submit" className="w-full rounded-full">Sign in</Button>
+                <Button type="submit" className="w-full rounded-full" disabled={busy}>{busy ? "Signing in..." : "Sign in"}</Button>
                 <button type="button" onClick={() => setScreen("forgot")} className="text-sm text-primary hover:underline w-full text-center">
                   Forgot password?
                 </button>
@@ -135,8 +143,8 @@ const Admin = () => {
                   <Label>Confirm password</Label>
                   <Input type="password" required value={newPwd2} onChange={e => setNewPwd2(e.target.value)} />
                 </div>
-                <Button type="submit" className="w-full rounded-full">
-                  <KeyRound className="w-4 h-4 mr-2" /> Update password
+                <Button type="submit" className="w-full rounded-full" disabled={busy}>
+                  <KeyRound className="w-4 h-4 mr-2" /> {busy ? "Updating..." : "Update password"}
                 </Button>
                 <button type="button" onClick={() => setScreen("login")} className="text-sm text-primary hover:underline w-full text-center">Back to login</button>
               </form>
@@ -417,23 +425,31 @@ const Dashboard = ({ onLogout }: DashProps) => {
 };
 
 const SettingsPanel = () => {
-  const [creds, setCreds] = useState(() => getAdminCreds());
-  const [email, setEmail] = useState(creds.email);
+  const [adminEmail, setAdminEmail] = useState(getCachedAdminEmail());
+  const [email, setEmail] = useState(adminEmail);
+  const [emailPwd, setEmailPwd] = useState("");
   const [currentPwd, setCurrentPwd] = useState("");
   const [newPwd, setNewPwd] = useState("");
   const [newPwd2, setNewPwd2] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  useEffect(() => { setEmail(creds.email); }, [creds.email]);
+  useEffect(() => {
+    fetchAdminEmail().then(e => { setAdminEmail(e); setEmail(e); });
+  }, []);
 
   const saveEmail = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = email.trim();
     if (!trimmed || !trimmed.includes("@")) return toast.error("Enter a valid email");
-    const oldEmail = creds.email;
-    const next = { ...creds, email: trimmed };
-    saveAdminCreds(next);
-    setCreds(next);
-    toast.success("Admin email updated");
+    if (!emailPwd) return toast.error("Enter your current password");
+    setBusy(true);
+    const ok = await changeAdminEmail(emailPwd, trimmed);
+    setBusy(false);
+    if (!ok) return toast.error("Wrong password or update failed");
+    const oldEmail = adminEmail;
+    setAdminEmail(trimmed);
+    setEmailPwd("");
+    toast.success("Admin email updated everywhere");
     const when = new Date().toLocaleString();
     sendFormSubmit(oldEmail, "Gilgitify admin email changed",
       `The admin email on Gilgitify was changed.\n\nOld email: ${oldEmail}\nNew email: ${trimmed}\nWhen: ${when}\n\nIf this wasn't you, reset the password immediately.`);
@@ -441,16 +457,16 @@ const SettingsPanel = () => {
       `This email (${trimmed}) is now the active admin contact for Gilgitify. You'll receive new-order alerts and password reset codes here.\nWhen: ${when}`);
   };
 
-  const savePwd = (e: React.FormEvent) => {
+  const savePwd = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (currentPwd !== creds.password) return toast.error("Current password is wrong");
     if (newPwd.length < 4) return toast.error("Password too short");
     if (newPwd !== newPwd2) return toast.error("Passwords do not match");
-    const next = { ...creds, password: newPwd };
-    saveAdminCreds(next);
-    setCreds(next);
+    setBusy(true);
+    const ok = await changeAdminPassword(currentPwd, newPwd);
+    setBusy(false);
+    if (!ok) return toast.error("Current password is wrong");
     setCurrentPwd(""); setNewPwd(""); setNewPwd2("");
-    toast.success("Password updated");
+    toast.success("Password updated everywhere");
     notifyAdmin("Gilgitify admin password changed",
       `The admin password was changed at ${new Date().toLocaleString()}.\n\nIf this wasn't you, use "Forgot password" on the login screen to reset it.`);
   };
@@ -459,16 +475,21 @@ const SettingsPanel = () => {
     <div className="grid md:grid-cols-2 gap-4">
       <form onSubmit={saveEmail} className="bg-card rounded-2xl shadow-card p-5 space-y-3">
         <h3 className="font-bold text-lg flex items-center gap-2"><Mail className="w-4 h-4" /> Change admin email</h3>
-        <p className="text-xs text-muted-foreground">This is where reset codes and order notifications go.</p>
+        <p className="text-xs text-muted-foreground">Synced across all devices. This is where reset codes and order notifications go.</p>
         <div>
           <Label>Admin email</Label>
           <Input type="email" value={email} onChange={e => setEmail(e.target.value)} required />
         </div>
-        <Button type="submit" className="rounded-full">Save email</Button>
+        <div>
+          <Label>Current password</Label>
+          <Input type="password" value={emailPwd} onChange={e => setEmailPwd(e.target.value)} required />
+        </div>
+        <Button type="submit" className="rounded-full" disabled={busy}>{busy ? "Saving..." : "Save email"}</Button>
       </form>
 
       <form onSubmit={savePwd} className="bg-card rounded-2xl shadow-card p-5 space-y-3">
         <h3 className="font-bold text-lg flex items-center gap-2"><KeyRound className="w-4 h-4" /> Change password</h3>
+        <p className="text-xs text-muted-foreground">Synced across all devices.</p>
         <div>
           <Label>Current password</Label>
           <Input type="password" value={currentPwd} onChange={e => setCurrentPwd(e.target.value)} required />
@@ -481,7 +502,7 @@ const SettingsPanel = () => {
           <Label>Confirm new password</Label>
           <Input type="password" value={newPwd2} onChange={e => setNewPwd2(e.target.value)} required />
         </div>
-        <Button type="submit" className="rounded-full">Update password</Button>
+        <Button type="submit" className="rounded-full" disabled={busy}>{busy ? "Updating..." : "Update password"}</Button>
       </form>
     </div>
   );
