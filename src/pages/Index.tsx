@@ -41,7 +41,7 @@ const Index = () => {
                 Agar aap log chahte ho to hum yahan se bhi aapke liye saman laa sakte hain.
               </h1>
               <p className="text-sm sm:text-base md:text-lg text-muted-foreground mb-5 max-w-2xl animate-slide-up" style={{ animationDelay: "0.1s" }}>
-                If you want, we can also bring items for you from these popular hotels and general stores in Gilgit — fast and reliable delivery.
+                Gilgitify Online Delivery Store
               </p>
               <div className="flex flex-wrap gap-2.5 animate-slide-up" style={{ animationDelay: "0.2s" }}>
                 <Link to="/shop"><Button variant="destructive" className="rounded-full px-6 h-10 shadow-elevated">Order Now</Button></Link>
