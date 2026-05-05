@@ -14,6 +14,10 @@ import Signup from "./pages/Signup.tsx";
 import Profile from "./pages/Profile.tsx";
 import Orders from "./pages/Orders.tsx";
 import Admin from "./pages/Admin.tsx";
+import BecomeSeller from "./pages/BecomeSeller.tsx";
+import Vendor from "./pages/Vendor.tsx";
+import Stores from "./pages/Stores.tsx";
+import StoreFront from "./pages/StoreFront.tsx";
 import About from "./pages/About.tsx";
 import Contact from "./pages/Contact.tsx";
 import FAQ from "./pages/FAQ.tsx";
@@ -40,6 +44,10 @@ const App = () => (
             <Route path="/profile" element={<Profile />} />
             <Route path="/orders" element={<Orders />} />
             <Route path="/admin" element={<Admin />} />
+            <Route path="/become-a-seller" element={<BecomeSeller />} />
+            <Route path="/vendor" element={<Vendor />} />
+            <Route path="/stores" element={<Stores />} />
+            <Route path="/store/:slug" element={<StoreFront />} />
             <Route path="/about" element={<About />} />
             <Route path="/contact" element={<Contact />} />
             <Route path="/faq" element={<FAQ />} />

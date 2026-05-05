@@ -5,9 +5,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useEffect, useMemo, useState } from "react";
-import { Trash2, Edit, Plus, X, Bell, LogOut, Mail, KeyRound, ShieldCheck, Users, Package, ShoppingBag, Wallet, Clock, CheckCircle2 } from "lucide-react";
+import { Trash2, Edit, Plus, X, Bell, LogOut, Mail, KeyRound, ShieldCheck, Users, Package, ShoppingBag, Wallet, Clock, CheckCircle2, Store as StoreIcon, Inbox, Check, Ban, Power } from "lucide-react";
 import { toast } from "sonner";
 import { Product, categories, Category } from "@/data/products";
+import {
+  listApplications, approveApplication, rejectApplication,
+  listAllStores, deleteStore, setStoreStatus, markPremiumPaid,
+  StoreApplication, Store as VendorStore,
+} from "@/lib/vendor";
 import {
   fetchAdminEmail,
   getCachedAdminEmail,
@@ -162,7 +167,7 @@ interface DashProps { onLogout: () => void }
 
 const Dashboard = ({ onLogout }: DashProps) => {
   const { products, orders, addProduct, updateProduct, deleteProduct, updateOrderStatus } = useStore();
-  const [tab, setTab] = useState<"overview" | "products" | "orders" | "clients" | "settings">("overview");
+  const [tab, setTab] = useState<"overview" | "products" | "orders" | "clients" | "applications" | "stores" | "settings">("overview");
   const [editing, setEditing] = useState<Product | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<Omit<Product, "id">>(empty);
@@ -262,7 +267,7 @@ const Dashboard = ({ onLogout }: DashProps) => {
         </div>
 
         <div className="flex gap-2 mb-6 overflow-x-auto">
-          {(["overview", "products", "orders", "clients", "settings"] as const).map(t => (
+          {(["overview", "products", "orders", "clients", "applications", "stores", "settings"] as const).map(t => (
             <button key={t} onClick={() => setTab(t)}
               className={`px-4 py-2 rounded-full text-sm font-semibold whitespace-nowrap capitalize ${tab === t ? "bg-primary text-primary-foreground" : "bg-secondary"}`}>
               {t}
@@ -446,9 +451,218 @@ const Dashboard = ({ onLogout }: DashProps) => {
           </div>
         )}
 
+        {tab === "applications" && <ApplicationsPanel />}
+        {tab === "stores" && <StoresPanel />}
         {tab === "settings" && <SettingsPanel />}
       </div>
     </Layout>
+  );
+};
+
+const ApplicationsPanel = () => {
+  const [apps, setApps] = useState<StoreApplication[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const refresh = async () => {
+    setLoading(true);
+    setApps(await listApplications());
+    setLoading(false);
+  };
+  useEffect(() => { refresh(); }, []);
+
+  const approve = async (app: StoreApplication) => {
+    setBusyId(app.id);
+    const res = await approveApplication(app.id);
+    setBusyId(null);
+    if (!res.ok) return toast.error(res.msg || "Could not approve");
+    toast.success(`Approved! Store created at /store/${res.store?.slug}`);
+    refresh();
+  };
+
+  const reject = async (app: StoreApplication) => {
+    const note = prompt("Reason for rejection (optional):") || undefined;
+    setBusyId(app.id);
+    const ok = await rejectApplication(app.id, note);
+    setBusyId(null);
+    if (!ok) return toast.error("Could not reject");
+    toast.success("Rejected");
+    refresh();
+  };
+
+  const pending = apps.filter(a => a.status === "pending");
+  const others = apps.filter(a => a.status !== "pending");
+
+  if (loading) return <div className="text-center py-10 text-muted-foreground">Loading applications...</div>;
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <Inbox className="w-5 h-5 text-primary" />
+          <h3 className="font-bold text-lg">Pending applications ({pending.length})</h3>
+        </div>
+        {pending.length === 0 ? (
+          <div className="bg-card rounded-2xl shadow-card p-6 text-sm text-muted-foreground">No pending applications.</div>
+        ) : (
+          <div className="space-y-3">
+            {pending.map(a => (
+              <div key={a.id} className="bg-card rounded-2xl shadow-card p-5">
+                <div className="flex justify-between items-start gap-4 flex-wrap">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-bold text-lg">{a.shopName}</div>
+                    <div className="text-sm text-muted-foreground">
+                      by {a.fullName} • 📞 {a.phone} • ✉️ {a.email}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      Category: {a.shopCategory || "—"} • Submitted: {new Date(a.createdAt).toLocaleString()}
+                    </div>
+                    <p className="text-sm mt-2 whitespace-pre-wrap">{a.shopDescription}</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button size="sm" disabled={busyId === a.id} onClick={() => approve(a)} className="rounded-full">
+                      <Check className="w-4 h-4 mr-1" /> Approve
+                    </Button>
+                    <Button size="sm" variant="destructive" disabled={busyId === a.id} onClick={() => reject(a)} className="rounded-full">
+                      <X className="w-4 h-4 mr-1" /> Reject
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {others.length > 0 && (
+        <div>
+          <h3 className="font-bold text-lg mb-3">History</h3>
+          <div className="bg-card rounded-2xl shadow-card overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-secondary"><tr>
+                <th className="text-left p-3">Shop</th>
+                <th className="text-left p-3">Owner</th>
+                <th className="text-left p-3">Phone</th>
+                <th className="text-left p-3">Status</th>
+                <th className="text-left p-3">Reviewed</th>
+              </tr></thead>
+              <tbody>
+                {others.map(a => (
+                  <tr key={a.id} className="border-t">
+                    <td className="p-3 font-medium">{a.shopName}</td>
+                    <td className="p-3">{a.fullName}<div className="text-xs text-muted-foreground">{a.email}</div></td>
+                    <td className="p-3">{a.phone}</td>
+                    <td className={`p-3 capitalize ${a.status === "approved" ? "text-emerald-700" : "text-red-700"}`}>{a.status}</td>
+                    <td className="p-3 text-xs text-muted-foreground">{a.reviewedAt ? new Date(a.reviewedAt).toLocaleString() : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const StoresPanel = () => {
+  const [stores, setStores] = useState<VendorStore[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const refresh = async () => {
+    setLoading(true);
+    setStores(await listAllStores());
+    setLoading(false);
+  };
+  useEffect(() => { refresh(); }, []);
+
+  const toggleStatus = async (s: VendorStore) => {
+    const next = s.status === "approved" ? "suspended" : "approved";
+    if (!confirm(`${next === "suspended" ? "Suspend" : "Reactivate"} "${s.name}"?`)) return;
+    setBusyId(s.id);
+    const ok = await setStoreStatus(s.id, next);
+    setBusyId(null);
+    if (!ok) return toast.error("Could not update");
+    toast.success(`Store ${next}`);
+    refresh();
+  };
+
+  const remove = async (s: VendorStore) => {
+    if (!confirm(`PERMANENTLY DELETE store "${s.name}" and all its products? This cannot be undone.`)) return;
+    setBusyId(s.id);
+    const ok = await deleteStore(s.id);
+    setBusyId(null);
+    if (!ok) return toast.error("Could not delete");
+    toast.success("Store deleted");
+    refresh();
+  };
+
+  const markPaid = async (s: VendorStore) => {
+    const monthsStr = prompt(`Mark premium plan paid for "${s.name}". Number of months:`, "1");
+    if (!monthsStr) return;
+    const months = parseInt(monthsStr, 10);
+    if (!Number.isFinite(months) || months <= 0) return toast.error("Enter a valid number of months");
+    setBusyId(s.id);
+    const ok = await markPremiumPaid(s.id, months);
+    setBusyId(null);
+    if (!ok) return toast.error("Could not save");
+    toast.success(`Premium recorded for ${months} month(s)`);
+    refresh();
+  };
+
+  const fmtExpiry = (s: VendorStore) => {
+    if (!s.premiumExpiresAt) return <span className="text-amber-700">Not paid</span>;
+    const d = new Date(s.premiumExpiresAt);
+    const expired = d.getTime() < Date.now();
+    return <span className={expired ? "text-red-700" : "text-emerald-700"}>{expired ? "Expired " : "Until "}{d.toLocaleDateString()}</span>;
+  };
+
+  if (loading) return <div className="text-center py-10 text-muted-foreground">Loading stores...</div>;
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <StoreIcon className="w-5 h-5 text-primary" />
+        <h3 className="font-bold text-lg">Stores ({stores.length})</h3>
+      </div>
+      {stores.length === 0 ? (
+        <div className="bg-card rounded-2xl shadow-card p-6 text-sm text-muted-foreground">No stores yet.</div>
+      ) : (
+        <div className="space-y-3">
+          {stores.map(s => (
+            <div key={s.id} className="bg-card rounded-2xl shadow-card p-5">
+              <div className="flex justify-between items-start gap-4 flex-wrap">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-bold text-lg">{s.name}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${s.status === "approved" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>{s.status}</span>
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    by {s.ownerName} • 📞 {s.ownerPhone || "—"} • ✉️ {s.ownerEmail}
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1">
+                    /store/{s.slug} • Premium: {fmtExpiry(s)}
+                  </div>
+                  {s.description && <p className="text-sm mt-2 line-clamp-2">{s.description}</p>}
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                  <Button size="sm" variant="outline" disabled={busyId === s.id} onClick={() => markPaid(s)} className="rounded-full">
+                    <Wallet className="w-4 h-4 mr-1" /> Mark paid (cash)
+                  </Button>
+                  <Button size="sm" variant="outline" disabled={busyId === s.id} onClick={() => toggleStatus(s)} className="rounded-full">
+                    {s.status === "approved" ? <><Ban className="w-4 h-4 mr-1" /> Suspend</> : <><Power className="w-4 h-4 mr-1" /> Reactivate</>}
+                  </Button>
+                  <Button size="sm" variant="destructive" disabled={busyId === s.id} onClick={() => remove(s)} className="rounded-full">
+                    <Trash2 className="w-4 h-4 mr-1" /> Delete
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 };
 
