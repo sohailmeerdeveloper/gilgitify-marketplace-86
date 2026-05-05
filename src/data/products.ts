@@ -1,4 +1,14 @@
-export type Category = "general" | "meat" | "vegetable" | "grocery";
+export type Category =
+  | "general"
+  | "meat"
+  | "vegetable"
+  | "grocery"
+  | "cosmetics"
+  | "garments"
+  | "dry_fruits"
+  | "stationery"
+  | "electronics"
+  | "fast_food";
 
 export interface Product {
   id: string;
@@ -36,6 +46,42 @@ export const categories: { id: Category; label: string; image: string; descripti
     label: "Grocery",
     description: "Rice, oils, spices and more",
     image: "https://images.unsplash.com/photo-1578916171728-46686eac8d58?w=600&q=80",
+  },
+  {
+    id: "cosmetics",
+    label: "Cosmetics",
+    description: "Skincare, makeup & beauty",
+    image: "https://images.unsplash.com/photo-1522335789203-aaa2f6d4cdb1?w=600&q=80",
+  },
+  {
+    id: "garments",
+    label: "Garments",
+    description: "Clothing, fabrics & apparel",
+    image: "https://images.unsplash.com/photo-1483985988355-763728e1935b?w=600&q=80",
+  },
+  {
+    id: "dry_fruits",
+    label: "Dry Fruits",
+    description: "Almonds, walnuts, apricots & more",
+    image: "https://images.unsplash.com/photo-1604908554007-9354dca5d234?w=600&q=80",
+  },
+  {
+    id: "stationery",
+    label: "Stationery",
+    description: "Books, pens & school supplies",
+    image: "https://images.unsplash.com/photo-1455390582262-044cdead277a?w=600&q=80",
+  },
+  {
+    id: "electronics",
+    label: "Electronics",
+    description: "Phones, accessories & gadgets",
+    image: "https://images.unsplash.com/photo-1518770660439-4636190af475?w=600&q=80",
+  },
+  {
+    id: "fast_food",
+    label: "Fast Food",
+    description: "Burgers, pizza, broast & more",
+    image: "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=600&q=80",
   },
 ];
 

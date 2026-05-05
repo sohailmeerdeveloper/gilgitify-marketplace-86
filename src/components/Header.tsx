@@ -13,29 +13,38 @@ export function Header() {
   const links = [
     { to: "/", label: "Home" },
     { to: "/shop", label: "Shop" },
+    { to: "/stores", label: "Stores" },
     { to: "/about", label: "About" },
     { to: "/contact", label: "Contact" },
   ];
 
   return (
     <header className="sticky top-0 z-40 bg-primary text-primary-foreground shadow-card">
-      <div className="container flex items-center justify-between h-16 md:h-20 gap-4">
+      <div className="container flex items-center justify-between h-14 md:h-16 gap-3">
         <Link to="/" className="flex items-center group">
-          <div className="bg-white rounded-xl px-2 py-1 shadow-md">
-            <img src={logo} alt="Gilgitify" className="h-10 md:h-12 w-auto object-contain" />
+          <div className="bg-white rounded-lg px-1.5 py-0.5 shadow-md">
+            <img src={logo} alt="Gilgitify" className="h-8 md:h-10 w-auto object-contain" />
           </div>
         </Link>
 
-        <nav className="hidden md:flex items-center gap-1">
+        <nav className="hidden md:flex items-center gap-0.5">
           {links.map(l => (
             <NavLink key={l.to} to={l.to} end={l.to === "/"}
               className={({ isActive }) =>
-                `px-4 py-2 rounded-full text-sm font-medium transition-all ${isActive ? "bg-white/20" : "hover:bg-white/10"}`}
+                `px-2.5 py-1.5 rounded-full text-[13px] font-medium transition-all ${isActive ? "bg-white/20" : "hover:bg-white/10"}`}
             >{l.label}</NavLink>
           ))}
+          <NavLink to="/become-a-seller"
+            className={({ isActive }) =>
+              `px-2.5 py-1.5 rounded-full text-[13px] font-medium transition-all ${isActive ? "bg-white/20" : "hover:bg-white/10"}`}
+          >Sell with us</NavLink>
+          <NavLink to="/vendor"
+            className={({ isActive }) =>
+              `px-2.5 py-1.5 rounded-full text-[13px] font-medium transition-all ${isActive ? "bg-white/20" : "hover:bg-white/10"}`}
+          >Vendor</NavLink>
           <NavLink to="/admin"
             className={({ isActive }) =>
-              `px-4 py-2 rounded-full text-sm font-medium transition-all ${isActive ? "bg-white/20" : "hover:bg-white/10"}`}
+              `px-2.5 py-1.5 rounded-full text-[13px] font-medium transition-all ${isActive ? "bg-white/20" : "hover:bg-white/10"}`}
           >Admin</NavLink>
         </nav>
 
@@ -86,6 +95,8 @@ export function Header() {
                 {l.label}
               </Link>
             ))}
+            <Link to="/become-a-seller" onClick={() => setOpen(false)} className={`px-4 py-2.5 rounded-lg text-sm font-medium ${loc.pathname === "/become-a-seller" ? "bg-white/20" : "hover:bg-white/10"}`}>Sell with us</Link>
+            <Link to="/vendor" onClick={() => setOpen(false)} className={`px-4 py-2.5 rounded-lg text-sm font-medium ${loc.pathname === "/vendor" ? "bg-white/20" : "hover:bg-white/10"}`}>Vendor Dashboard</Link>
             <Link to="/admin" onClick={() => setOpen(false)} className={`px-4 py-2.5 rounded-lg text-sm font-medium ${loc.pathname === "/admin" ? "bg-white/20" : "hover:bg-white/10"}`}>Admin</Link>
             {user ? (
               <>
