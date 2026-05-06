@@ -7,7 +7,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { useEffect, useMemo, useState } from "react";
 import { Trash2, Edit, Plus, X, Bell, LogOut, Mail, KeyRound, ShieldCheck, Users, Package, ShoppingBag, Wallet, Clock, CheckCircle2, Store as StoreIcon, Inbox, Check, Ban, Power } from "lucide-react";
 import { toast } from "sonner";
-import { Product, categories, Category } from "@/data/products";
+import { Product, Category } from "@/data/products";
+import { useCategories } from "@/hooks/useCategories";
+import { CategoriesPanel } from "@/components/admin/CategoriesPanel";
+import { AdsPanel } from "@/components/admin/AdsPanel";
 import {
   listApplications, approveApplication, rejectApplication,
   listAllStores, deleteStore, setStoreStatus, markPremiumPaid,
@@ -167,7 +170,8 @@ interface DashProps { onLogout: () => void }
 
 const Dashboard = ({ onLogout }: DashProps) => {
   const { products, orders, addProduct, updateProduct, deleteProduct, updateOrderStatus } = useStore();
-  const [tab, setTab] = useState<"overview" | "products" | "orders" | "clients" | "applications" | "stores" | "settings">("overview");
+  const { categories } = useCategories();
+  const [tab, setTab] = useState<"overview" | "products" | "categories" | "ads" | "orders" | "clients" | "applications" | "stores" | "settings">("overview");
   const [editing, setEditing] = useState<Product | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<Omit<Product, "id">>(empty);
@@ -267,7 +271,7 @@ const Dashboard = ({ onLogout }: DashProps) => {
         </div>
 
         <div className="flex gap-2 mb-6 overflow-x-auto">
-          {(["overview", "products", "orders", "clients", "applications", "stores", "settings"] as const).map(t => (
+          {(["overview", "products", "categories", "ads", "orders", "clients", "applications", "stores", "settings"] as const).map(t => (
             <button key={t} onClick={() => setTab(t)}
               className={`px-4 py-2 rounded-full text-sm font-semibold whitespace-nowrap capitalize ${tab === t ? "bg-primary text-primary-foreground" : "bg-secondary"}`}>
               {t}
@@ -368,7 +372,7 @@ const Dashboard = ({ onLogout }: DashProps) => {
                     <div><Label>Unit</Label><Input value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value })} /></div>
                     <div><Label>Category</Label>
                       <select className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" value={form.category} onChange={e => setForm({ ...form, category: e.target.value as Category })}>
-                        {categories.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                        {categories.map(c => <option key={c.slug} value={c.slug}>{c.label}</option>)}
                       </select>
                     </div>
                   </div>
@@ -451,6 +455,8 @@ const Dashboard = ({ onLogout }: DashProps) => {
           </div>
         )}
 
+        {tab === "categories" && <CategoriesPanel />}
+        {tab === "ads" && <AdsPanel />}
         {tab === "applications" && <ApplicationsPanel />}
         {tab === "stores" && <StoresPanel />}
         {tab === "settings" && <SettingsPanel />}

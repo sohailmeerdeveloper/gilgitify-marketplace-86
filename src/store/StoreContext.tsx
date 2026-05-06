@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, ReactNode, useCallback 
 import { supabase } from "@/integrations/supabase/client";
 import { Product, seedProducts } from "@/data/products";
 import { notifyAdmin } from "@/lib/adminAuth";
+import { listProducts, createProduct, updateProductRow, deleteProductRow } from "@/lib/productsApi";
 
 export interface CartItem { product: Product; qty: number; }
 export interface User { id: string; name: string; email: string; phone?: string; address?: string; isAdmin?: boolean; }
@@ -53,7 +54,6 @@ const StoreCtx = createContext<StoreState | null>(null);
 const KEY = "gilgitify_v1";
 type Persisted = { cart: CartItem[]; orders: Order[]; products: Product[] };
 type ProductMutationResult = { ok: boolean; synced: boolean };
-type ApiWriteResult = boolean | null;
 
 type ProfileRow = {
   user_id: string;
@@ -117,7 +117,6 @@ async function loadCurrentUser(authUserId: string, fallbackEmail = ""): Promise<
 
 const API_BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const API_ORDERS = `${API_BASE}/api/orders.php`;
-const API_PRODUCTS = `${API_BASE}/api/products.php`;
 
 async function apiGetOrders(): Promise<Order[] | null> {
   try {
@@ -154,69 +153,6 @@ async function apiUpdateOrderStatus(id: string, status: Order["status"]): Promis
   } catch { return false; }
 }
 
-async function apiGetProducts(): Promise<Product[] | null> {
-  try {
-    const res = await fetch(API_PRODUCTS, { cache: "no-store" });
-    if (!res.ok) return null;
-    const ct = res.headers.get("content-type") || "";
-    if (!ct.includes("json")) return null;
-    const data = await res.json() as { products?: Product[] };
-    return Array.isArray(data.products) ? data.products : [];
-  } catch {
-    return null;
-  }
-}
-
-async function readProductWrite(res: Response): Promise<ApiWriteResult> {
-  if (!res.ok) return false;
-  const ct = res.headers.get("content-type") || "";
-  if (!ct.includes("json")) return null;
-  const data = await res.json() as { ok?: boolean };
-  return data.ok !== false;
-}
-
-async function apiSaveProduct(product: Product): Promise<ApiWriteResult> {
-  try {
-    const res = await fetch(API_PRODUCTS, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(product),
-    });
-    return readProductWrite(res);
-  } catch {
-    return null;
-  }
-}
-
-async function apiUpdateProduct(id: string, patch: Partial<Product>): Promise<ApiWriteResult> {
-  try {
-    const res = await fetch(API_PRODUCTS, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, ...patch }),
-    });
-    return readProductWrite(res);
-  } catch {
-    return null;
-  }
-}
-
-async function apiDeleteProduct(id: string): Promise<ApiWriteResult> {
-  try {
-    const res = await fetch(`${API_PRODUCTS}?id=${encodeURIComponent(id)}`, {
-      method: "DELETE",
-      headers: { Accept: "application/json" },
-    });
-    return readProductWrite(res);
-  } catch {
-    return null;
-  }
-}
-
-const productMutationResult = (result: ApiWriteResult): ProductMutationResult => ({
-  ok: result !== false,
-  synced: result === true,
-});
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<Persisted>(load);
@@ -246,17 +182,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // Sync products from the Hostinger PHP API so admin product changes
-  // become visible to every shopper, not just the admin's browser.
+  // Sync products from Supabase. Falls back to whatever's cached locally if
+  // the network call fails. Polls every 12s + on window focus so any browser
+  // sees admin updates without a manual refresh.
   useEffect(() => {
     let cancelled = false;
     const fetchProducts = async () => {
-      const remote = await apiGetProducts();
-      if (cancelled || !remote) return;
-      setState(s => ({ ...s, products: remote }));
+      const remote = await listProducts();
+      if (cancelled) return;
+      // If the table is empty (fresh install) keep showing seedProducts so
+      // the homepage isn't blank before the admin adds anything.
+      if (remote.length > 0) {
+        setState(s => ({ ...s, products: remote }));
+      }
     };
     fetchProducts();
-    const id = window.setInterval(fetchProducts, 8000);
+    const id = window.setInterval(fetchProducts, 12000);
     const onFocus = () => fetchProducts();
     window.addEventListener("focus", onFocus);
     return () => {
@@ -344,11 +285,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const signup: StoreState["signup"] = async (name, email, password) => {
     const cleanName = name.trim();
     const cleanEmail = email.trim().toLowerCase();
+    // emailRedirectTo points back at this site (never lovable/external) in case
+    // the Supabase project still has confirmation emails enabled. The actual
+    // verification users complete is the 6-digit code we send from /signup.
     const { data, error } = await supabase.auth.signUp({
       email: cleanEmail,
       password,
       options: {
-        emailRedirectTo: window.location.origin,
+        emailRedirectTo: `${window.location.origin}/verify-email?email=${encodeURIComponent(cleanEmail)}`,
         data: { display_name: cleanName },
       },
     });
@@ -361,7 +305,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         .upsert({ user_id: data.user.id, display_name: cleanName, email: cleanEmail }, { onConflict: "user_id" });
     }
 
-    return { ok: true, msg: data.session ? "Account created." : "Account created. Check your email to verify it before logging in." };
+    return { ok: true, msg: "Account created. Enter the 6-digit code we just emailed you." };
   };
 
   const login: StoreState["login"] = async (email, password) => {
@@ -453,30 +397,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const product: Product = { ...p, id: `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}` };
     setState(s => ({ ...s, products: [product, ...s.products] }));
 
-    const synced = await apiSaveProduct(product);
-    if (synced === false) {
+    const ok = await createProduct(product);
+    if (!ok) {
       setState(s => ({ ...s, products: s.products.filter(item => item.id !== product.id) }));
-    } else if (synced === true) {
-      const remote = await apiGetProducts();
-      if (remote) setState(s => ({ ...s, products: remote }));
+      return { ok: false, synced: false };
     }
-
-    return productMutationResult(synced);
+    const remote = await listProducts();
+    if (remote.length > 0) setState(s => ({ ...s, products: remote }));
+    return { ok: true, synced: true };
   };
 
   const updateProduct: StoreState["updateProduct"] = async (id, patch) => {
     const previous = state.products.find(p => p.id === id);
     setState(s => ({ ...s, products: s.products.map(p => p.id === id ? { ...p, ...patch } : p) }));
 
-    const synced = await apiUpdateProduct(id, patch);
-    if (synced === false && previous) {
+    const ok = await updateProductRow(id, patch);
+    if (!ok && previous) {
       setState(s => ({ ...s, products: s.products.map(p => p.id === id ? previous : p) }));
-    } else if (synced === true) {
-      const remote = await apiGetProducts();
-      if (remote) setState(s => ({ ...s, products: remote }));
+      return { ok: false, synced: false };
     }
-
-    return productMutationResult(synced);
+    const remote = await listProducts();
+    if (remote.length > 0) setState(s => ({ ...s, products: remote }));
+    return { ok: true, synced: true };
   };
 
   const deleteProduct: StoreState["deleteProduct"] = async (id) => {
@@ -484,19 +426,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const previous = previousIndex >= 0 ? state.products[previousIndex] : undefined;
     setState(s => ({ ...s, products: s.products.filter(p => p.id !== id) }));
 
-    const synced = await apiDeleteProduct(id);
-    if (synced === false && previous) {
+    const ok = await deleteProductRow(id);
+    if (!ok && previous) {
       setState(s => {
         const products = [...s.products];
         products.splice(Math.min(previousIndex, products.length), 0, previous);
         return { ...s, products };
       });
-    } else if (synced === true) {
-      const remote = await apiGetProducts();
-      if (remote) setState(s => ({ ...s, products: remote }));
+      return { ok: false, synced: false };
     }
-
-    return productMutationResult(synced);
+    const remote = await listProducts();
+    setState(s => ({ ...s, products: remote.length > 0 ? remote : s.products }));
+    return { ok: true, synced: true };
   };
 
   const cartCount = state.cart.reduce((n, c) => n + c.qty, 0);

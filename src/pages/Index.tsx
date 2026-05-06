@@ -1,10 +1,9 @@
 import { Link } from "react-router-dom";
 import { Layout } from "@/components/Layout";
-import { Button } from "@/components/ui/button";
 import { ProductCard } from "@/components/ProductCard";
 import { useStore } from "@/store/StoreContext";
-import { categories } from "@/data/products";
-import heroImg from "@/assets/hero-grocery.jpg";
+import { useCategories } from "@/hooks/useCategories";
+import { AdSlot } from "@/components/AdSlot";
 import { Truck, Store, Coins, Leaf, Phone, MessageCircle, Hotel, ShoppingBag } from "lucide-react";
 
 const popularHotels = [
@@ -21,102 +20,55 @@ const popularStores = [
 
 const Index = () => {
   const { products } = useStore();
+  const { categories } = useCategories();
   const featured = products.slice(0, 8);
 
   return (
     <Layout>
-      {/* HERO */}
-      <section className="relative overflow-hidden">
-        <div className="absolute inset-0">
-          <img src={heroImg} alt="Fresh groceries delivered in Gilgit" className="w-full h-full object-cover" width={1920} height={896} />
-          <div className="absolute inset-0 bg-gradient-to-r from-white/95 via-white/85 to-white/50" />
-        </div>
-        <div className="container relative py-10 md:py-16 lg:py-20">
-          <div className="grid lg:grid-cols-5 gap-8 lg:gap-10 items-center">
-            <div className="lg:col-span-3">
-              <span className="inline-block px-3 py-1 rounded-full bg-primary/10 text-primary text-[11px] font-semibold uppercase tracking-wider mb-3 animate-fade-in">
-                Gilgit-Baltistan's #1 Delivery Store
-              </span>
-              <h1 className="font-display text-3xl sm:text-4xl md:text-5xl lg:text-6xl text-primary-deep leading-[1.15] mb-3 animate-slide-up">
-                Agar aap log chahte ho to hum yahan se bhi aapke liye saman laa sakte hain.
-              </h1>
-              <p className="text-sm sm:text-base md:text-lg text-muted-foreground mb-5 max-w-2xl animate-slide-up" style={{ animationDelay: "0.1s" }}>
-                Gilgitify Online Delivery Store
-              </p>
-              <div className="flex flex-wrap gap-2.5 animate-slide-up" style={{ animationDelay: "0.2s" }}>
-                <Link to="/shop"><Button variant="destructive" className="rounded-full px-6 h-10 shadow-elevated">Order Now</Button></Link>
-                <a href="https://wa.me/923145556548"><Button variant="outline" className="rounded-full px-6 h-10 border-primary text-primary hover:bg-primary hover:text-primary-foreground">
-                  <MessageCircle className="w-4 h-4 mr-2" /> Call / WhatsApp
-                </Button></a>
-              </div>
-            </div>
-
-            <div className="lg:col-span-2 grid sm:grid-cols-2 lg:grid-cols-1 gap-3 animate-fade-in" style={{ animationDelay: "0.25s" }}>
-              <div className="bg-white/90 backdrop-blur rounded-2xl p-4 shadow-card border border-primary/10">
-                <div className="flex items-center gap-2 mb-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
-                    <Hotel className="w-4 h-4 text-primary" />
-                  </div>
-                  <h3 className="font-bold text-primary-deep text-sm">Popular Hotels</h3>
-                </div>
-                <ul className="space-y-1">
-                  {popularHotels.map(h => (
-                    <li key={h} className="text-xs sm:text-sm text-foreground flex items-center gap-1.5">
-                      <span className="w-1 h-1 rounded-full bg-primary" /> {h}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div className="bg-white/90 backdrop-blur rounded-2xl p-4 shadow-card border border-primary/10">
-                <div className="flex items-center gap-2 mb-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
-                    <ShoppingBag className="w-4 h-4 text-primary" />
-                  </div>
-                  <h3 className="font-bold text-primary-deep text-sm">General Stores</h3>
-                </div>
-                <ul className="space-y-1">
-                  {popularStores.map(s => (
-                    <li key={s} className="text-xs sm:text-sm text-foreground flex items-center gap-1.5">
-                      <span className="w-1 h-1 rounded-full bg-primary" /> {s}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* SHOPS */}
-      <section className="bg-primary py-10 md:py-14">
+      {/* CATEGORIES — first thing after the navbar */}
+      <section className="bg-gradient-to-b from-secondary/40 to-background pt-6 md:pt-10 pb-8 md:pb-12">
         <div className="container">
-          <h2 className="font-display text-2xl sm:text-3xl md:text-4xl text-white text-center mb-6 md:mb-8">Our Shops</h2>
+          <div className="flex items-end justify-between mb-5 md:mb-6 flex-wrap gap-2">
+            <div>
+              <span className="inline-block px-3 py-0.5 rounded-full bg-primary/10 text-primary text-[11px] font-semibold uppercase tracking-wider mb-2">
+                Browse
+              </span>
+              <h2 className="font-display text-2xl sm:text-3xl md:text-4xl text-primary-deep">Shop by category</h2>
+              <p className="text-sm text-muted-foreground mt-0.5">Everything Gilgit-Baltistan needs, delivered fast</p>
+            </div>
+            <Link to="/shop" className="text-primary font-semibold text-sm hover:underline">Browse all →</Link>
+          </div>
+
           {/* Mobile: horizontal scroll */}
           <div className="md:hidden -mx-4 px-4 overflow-x-auto scroll-smooth">
-            <div className="flex gap-4 pb-2 snap-x snap-mandatory">
+            <div className="flex gap-3 pb-2 snap-x snap-mandatory">
               {categories.map((c, i) => (
-                <Link key={c.id} to={`/shop?cat=${c.id}`}
-                  className="group flex-none w-[112px] flex flex-col items-center snap-start animate-scale-in" style={{ animationDelay: `${i * 0.04}s` }}>
-                  <div className="w-24 h-24 rounded-full overflow-hidden bg-white shadow-elevated ring-2 ring-white/30">
-                    <img src={c.image} alt={c.label} loading="lazy" className="w-full h-full object-cover" />
+                <Link key={c.slug} to={`/shop?cat=${c.slug}`}
+                  className="group flex-none w-28 flex flex-col items-center snap-start animate-scale-in" style={{ animationDelay: `${i * 0.04}s` }}>
+                  <div className="w-24 h-24 rounded-2xl overflow-hidden bg-card shadow-card ring-1 ring-border group-hover:ring-primary/40 transition-all">
+                    <img src={c.image} alt={c.label} loading="lazy" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" />
                   </div>
-                  <div className="mt-2.5 px-3 py-1 rounded-full bg-accent text-accent-foreground font-semibold text-[11px] shadow-card text-center w-full truncate">
+                  <div className="mt-2 text-xs font-semibold text-primary-deep text-center w-full truncate">
                     {c.label}
                   </div>
                 </Link>
               ))}
             </div>
           </div>
+
           {/* Tablet/Desktop grid */}
-          <div className="hidden md:grid gap-5 grid-cols-3 lg:grid-cols-5">
+          <div className="hidden md:grid gap-4 lg:gap-5 grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
             {categories.map((c, i) => (
-              <Link key={c.id} to={`/shop?cat=${c.id}`}
-                className="group flex flex-col items-center animate-scale-in" style={{ animationDelay: `${i * 0.05}s` }}>
-                <div className="w-32 h-32 lg:w-36 lg:h-36 rounded-full overflow-hidden bg-white shadow-elevated ring-4 ring-white/30 group-hover:ring-white/60 transition-all group-hover:scale-105">
-                  <img src={c.image} alt={c.label} loading="lazy" className="w-full h-full object-cover" />
+              <Link key={c.slug} to={`/shop?cat=${c.slug}`}
+                className="group bg-card rounded-3xl overflow-hidden shadow-card hover:shadow-elevated transition-all hover:-translate-y-1 animate-scale-in"
+                style={{ animationDelay: `${i * 0.04}s` }}>
+                <div className="aspect-square overflow-hidden bg-secondary">
+                  <img src={c.image} alt={c.label} loading="lazy"
+                    className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
                 </div>
-                <div className="mt-3 px-4 py-1.5 rounded-full bg-accent text-accent-foreground font-semibold text-xs lg:text-sm shadow-card">
-                  {c.label}
+                <div className="p-3 text-center">
+                  <div className="font-bold text-primary-deep text-sm lg:text-base">{c.label}</div>
+                  {c.description && <div className="text-[11px] text-muted-foreground mt-0.5 line-clamp-1">{c.description}</div>}
                 </div>
               </Link>
             ))}
@@ -124,8 +76,47 @@ const Index = () => {
         </div>
       </section>
 
+      {/* SPONSORED BANNER */}
+      <AdSlot placement="home_banner" className="!py-2" />
+
+      {/* QUICK ACTIONS */}
+      <section className="container pb-2 md:pb-4">
+        <div className="grid sm:grid-cols-2 gap-3 md:gap-4">
+          <div className="bg-card rounded-2xl p-4 shadow-card border border-border/60 flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+              <Hotel className="w-5 h-5 text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h3 className="font-bold text-primary-deep text-sm">Popular hotels</h3>
+              <ul className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-0.5">
+                {popularHotels.map(h => (
+                  <li key={h} className="text-xs text-foreground flex items-center gap-1.5">
+                    <span className="w-1 h-1 rounded-full bg-primary shrink-0" /> <span className="truncate">{h}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+          <div className="bg-card rounded-2xl p-4 shadow-card border border-border/60 flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+              <ShoppingBag className="w-5 h-5 text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h3 className="font-bold text-primary-deep text-sm">General stores</h3>
+              <ul className="mt-1.5 space-y-0.5">
+                {popularStores.map(s => (
+                  <li key={s} className="text-xs text-foreground flex items-center gap-1.5">
+                    <span className="w-1 h-1 rounded-full bg-primary shrink-0" /> <span className="truncate">{s}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* FAST DELIVERY STRIP */}
-      <section className="bg-primary-deep py-8 md:py-10">
+      <section className="bg-primary-deep py-8 md:py-10 mt-6">
         <div className="container">
           <h3 className="text-white text-center text-xl md:text-2xl font-bold mb-5">Fast Delivery In Gilgit</h3>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
@@ -134,7 +125,7 @@ const Index = () => {
               { icon: Leaf, label: "Same Day Service" },
               { icon: Coins, label: "Delivery Charges Rs. 100" },
             ].map((it, i) => (
-              <div key={i} className="bg-white rounded-xl p-4 flex items-center gap-3 shadow-card">
+              <div key={i} className="bg-white rounded-xl p-4 flex items-center gap-3 shadow-card hover:shadow-elevated transition-shadow">
                 <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
                   <it.icon className="w-5 h-5 text-primary" />
                 </div>
@@ -142,7 +133,10 @@ const Index = () => {
               </div>
             ))}
           </div>
-          <p className="text-center text-white/80 mt-4 text-xs md:text-sm">Fast And Reliable Service</p>
+          <div className="flex flex-wrap justify-center gap-2 mt-5">
+            <Link to="/shop"><button className="px-5 py-2 rounded-full bg-accent text-accent-foreground font-bold text-sm shadow-elevated hover:scale-105 transition-transform">Order Now</button></Link>
+            <a href="https://wa.me/923145556548"><button className="px-5 py-2 rounded-full bg-white text-primary font-bold text-sm shadow-elevated hover:scale-105 transition-transform inline-flex items-center gap-2"><MessageCircle className="w-4 h-4" /> WhatsApp</button></a>
+          </div>
         </div>
       </section>
 

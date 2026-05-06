@@ -3,28 +3,30 @@ import { useMemo, useState } from "react";
 import { Layout } from "@/components/Layout";
 import { ProductCard } from "@/components/ProductCard";
 import { useStore } from "@/store/StoreContext";
-import { categories, Category } from "@/data/products";
 import { Input } from "@/components/ui/input";
 import { Search } from "lucide-react";
+import { useCategories } from "@/hooks/useCategories";
+import { AdSlot } from "@/components/AdSlot";
 
 const Shop = () => {
   const { products } = useStore();
+  const { categories } = useCategories();
   const [params, setParams] = useSearchParams();
-  const cat = (params.get("cat") as Category | null);
+  const cat = params.get("cat");
   const [q, setQ] = useState("");
 
   const filtered = useMemo(() => products.filter(p =>
     (!cat || p.category === cat) && p.name.toLowerCase().includes(q.toLowerCase())
   ), [products, cat, q]);
 
-  const setCat = (c: Category | null) => {
+  const setCat = (c: string | null) => {
     if (c) params.set("cat", c); else params.delete("cat");
     setParams(params);
   };
 
   return (
     <Layout>
-      <section className="bg-primary py-8 md:py-10">
+      <section className="bg-gradient-to-br from-primary to-primary-deep py-8 md:py-10">
         <div className="container text-center text-white">
           <h1 className="font-display text-3xl sm:text-4xl md:text-5xl mb-1">Shop</h1>
           <p className="text-white/80 text-sm md:text-base">Fresh products delivered fast across Gilgit</p>
@@ -43,13 +45,15 @@ const Shop = () => {
               All
             </button>
             {categories.map(c => (
-              <button key={c.id} onClick={() => setCat(c.id)}
-                className={`px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap transition-colors ${cat === c.id ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground hover:bg-primary/10"}`}>
+              <button key={c.slug} onClick={() => setCat(c.slug)}
+                className={`px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap transition-colors ${cat === c.slug ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground hover:bg-primary/10"}`}>
                 {c.label}
               </button>
             ))}
           </div>
         </div>
+
+        {cat && <AdSlot placement="category_page" category={cat} className="mb-5" />}
 
         {filtered.length === 0 ? (
           <div className="text-center py-20 text-muted-foreground">No products found.</div>

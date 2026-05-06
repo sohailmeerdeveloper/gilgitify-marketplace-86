@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useStore } from "@/store/StoreContext";
 import { toast } from "sonner";
+import { sendSignupCode } from "@/lib/signupVerification";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -26,11 +27,22 @@ const Signup = () => {
 
     setSubmitting(true);
     const res = await signup(name, email, form.password);
-    setSubmitting(false);
+    if (!res.ok) {
+      setSubmitting(false);
+      return toast.error(res.msg!);
+    }
 
-    if (!res.ok) return toast.error(res.msg!);
-    toast.success(res.msg || "Account created!");
-    nav("/login");
+    // Fire the 6-digit verification email. Even if it fails (e.g. FormSubmit
+    // not yet activated) we still let the user reach the verify screen so
+    // they can hit "Resend code".
+    const codeRes = await sendSignupCode(email);
+    setSubmitting(false);
+    if (!codeRes.ok) {
+      toast.error(codeRes.msg || "Account created, but we couldn't send the code. Try Resend on the next screen.");
+    } else {
+      toast.success("Code sent! Check your email.");
+    }
+    nav(`/verify-email?email=${encodeURIComponent(email)}`);
   };
 
   return (
@@ -38,7 +50,7 @@ const Signup = () => {
       <div className="container py-16 max-w-md">
         <div className="bg-card rounded-3xl p-8 shadow-elevated">
           <h1 className="font-display text-4xl text-primary-deep text-center mb-2">Join Gilgitify</h1>
-          <p className="text-center text-muted-foreground mb-6">Create your account</p>
+          <p className="text-center text-muted-foreground mb-6">Create your account — we'll email you a 6-digit code to verify.</p>
           <form onSubmit={submit} className="space-y-4">
             <div><Label>Full Name</Label><Input autoComplete="name" required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="mt-1" /></div>
             <div><Label>Email</Label><Input type="email" autoComplete="email" required value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} className="mt-1" /></div>

@@ -14,6 +14,129 @@ export type Database = {
   }
   public: {
     Tables: {
+      categories: {
+        Row: {
+          id: string
+          slug: string
+          label: string
+          description: string
+          image: string
+          sort_order: number
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          slug: string
+          label: string
+          description?: string
+          image?: string
+          sort_order?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          slug?: string
+          label?: string
+          description?: string
+          image?: string
+          sort_order?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      products: {
+        Row: {
+          id: string
+          name: string
+          name_urdu: string | null
+          price: number
+          category: string
+          image: string
+          description: string
+          unit: string
+          stock: number
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id: string
+          name: string
+          name_urdu?: string | null
+          price?: number
+          category?: string
+          image?: string
+          description?: string
+          unit?: string
+          stock?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          name_urdu?: string | null
+          price?: number
+          category?: string
+          image?: string
+          description?: string
+          unit?: string
+          stock?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      ads: {
+        Row: {
+          id: string
+          title: string
+          image: string
+          link: string | null
+          placement: string
+          category: string | null
+          vendor_label: string | null
+          is_active: boolean
+          starts_at: string
+          expires_at: string | null
+          sort_order: number
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          title: string
+          image?: string
+          link?: string | null
+          placement?: string
+          category?: string | null
+          vendor_label?: string | null
+          is_active?: boolean
+          starts_at?: string
+          expires_at?: string | null
+          sort_order?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          title?: string
+          image?: string
+          link?: string | null
+          placement?: string
+          category?: string | null
+          vendor_label?: string | null
+          is_active?: boolean
+          starts_at?: string
+          expires_at?: string | null
+          sort_order?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           address: string | null
@@ -73,6 +196,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      issue_signup_code: {
+        Args: { _email: string }
+        Returns: string
+      }
+      verify_signup_code: {
+        Args: { _email: string; _code: string }
+        Returns: boolean
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
