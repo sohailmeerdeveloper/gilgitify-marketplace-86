@@ -1,4 +1,9 @@
-import { supabase } from "@/integrations/supabase/client";
+// Categories live in /api/categories.php (JSON file storage on Hostinger).
+// On first GET against an empty data file, the PHP endpoint seeds the 10
+// default categories automatically — no migration step needed.
+
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+const URL = `${BASE}/api/categories.php`;
 
 export interface CategoryRow {
   id: string;
@@ -9,59 +14,66 @@ export interface CategoryRow {
   sortOrder: number;
 }
 
-const fromRow = (r: {
-  id: string; slug: string; label: string; description: string; image: string; sort_order: number;
-}): CategoryRow => ({
-  id: r.id, slug: r.slug, label: r.label,
-  description: r.description, image: r.image, sortOrder: r.sort_order,
-});
+async function asJson<T>(res: Response): Promise<T | null> {
+  if (!res.ok) return null;
+  const ct = res.headers.get("content-type") || "";
+  if (!ct.includes("json")) return null;
+  return await res.json() as T;
+}
 
 export async function listCategories(): Promise<CategoryRow[]> {
-  const { data, error } = await supabase
-    .from("categories")
-    .select("id, slug, label, description, image, sort_order")
-    .order("sort_order", { ascending: true });
-  if (error || !data) return [];
-  return data.map(fromRow);
+  try {
+    const res = await fetch(URL, { cache: "no-store" });
+    const data = await asJson<{ categories?: CategoryRow[] }>(res);
+    return data?.categories || [];
+  } catch { return []; }
 }
 
 export async function createCategory(input: {
   slug: string; label: string; description?: string; image?: string; sortOrder?: number;
 }): Promise<{ ok: boolean; msg?: string }> {
-  const slug = input.slug.trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_");
-  if (!slug) return { ok: false, msg: "Slug is required" };
+  if (!input.slug.trim()) return { ok: false, msg: "Slug is required" };
   if (!input.label.trim()) return { ok: false, msg: "Label is required" };
-  const { error } = await supabase.from("categories").insert({
-    slug,
-    label: input.label.trim(),
-    description: input.description?.trim() || "",
-    image: input.image?.trim() || "",
-    sort_order: input.sortOrder ?? 999,
-  });
-  if (error) return { ok: false, msg: error.message };
-  return { ok: true };
+  try {
+    const res = await fetch(URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    const data = await asJson<{ ok?: boolean; error?: string }>(res);
+    if (!data?.ok) return { ok: false, msg: data?.error || "Could not create category" };
+    return { ok: true };
+  } catch (e) { return { ok: false, msg: "Network error" }; }
 }
 
 export async function updateCategory(id: string, patch: Partial<Omit<CategoryRow, "id">>): Promise<boolean> {
-  const next: Record<string, unknown> = {};
-  if (patch.slug !== undefined) next.slug = patch.slug.trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_");
-  if (patch.label !== undefined) next.label = patch.label.trim();
-  if (patch.description !== undefined) next.description = patch.description.trim();
-  if (patch.image !== undefined) next.image = patch.image.trim();
-  if (patch.sortOrder !== undefined) next.sort_order = patch.sortOrder;
-  const { error } = await supabase.from("categories").update(next).eq("id", id);
-  return !error;
+  try {
+    const res = await fetch(URL, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, ...patch }),
+    });
+    const data = await asJson<{ ok?: boolean }>(res);
+    return Boolean(data?.ok);
+  } catch { return false; }
 }
 
 export async function deleteCategory(id: string): Promise<boolean> {
-  const { error } = await supabase.from("categories").delete().eq("id", id);
-  return !error;
+  try {
+    const res = await fetch(`${URL}?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    const data = await asJson<{ ok?: boolean }>(res);
+    return Boolean(data?.ok);
+  } catch { return false; }
 }
 
 export async function reorderCategories(orderedIds: string[]): Promise<boolean> {
-  // Re-number sort_order based on the order of ids passed in.
-  await Promise.all(orderedIds.map((id, idx) =>
-    supabase.from("categories").update({ sort_order: (idx + 1) * 10 }).eq("id", id)
-  ));
-  return true;
+  try {
+    const res = await fetch(`${URL}?action=reorder`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: orderedIds }),
+    });
+    const data = await asJson<{ ok?: boolean }>(res);
+    return Boolean(data?.ok);
+  } catch { return false; }
 }

@@ -14,7 +14,9 @@ $method = $_SERVER['REQUEST_METHOD'];
 $body = read_body();
 
 function valid_category(string $category): bool {
-  return in_array($category, ['general', 'meat', 'vegetable', 'grocery'], true);
+  // Any non-empty slug is valid. Categories are admin-managed in
+  // categories.php; we don't gate products against a fixed list here.
+  return $category !== '';
 }
 
 function clean_product(array $input, ?array $existing = null): ?array {

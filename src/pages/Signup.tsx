@@ -6,7 +6,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useStore } from "@/store/StoreContext";
 import { toast } from "sonner";
-import { sendSignupCode } from "@/lib/signupVerification";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -27,21 +26,9 @@ const Signup = () => {
 
     setSubmitting(true);
     const res = await signup(name, email, form.password);
-    if (!res.ok) {
-      setSubmitting(false);
-      return toast.error(res.msg!);
-    }
-
-    // Fire the 6-digit verification email. Even if it fails (e.g. FormSubmit
-    // not yet activated) we still let the user reach the verify screen so
-    // they can hit "Resend code".
-    const codeRes = await sendSignupCode(email);
     setSubmitting(false);
-    if (!codeRes.ok) {
-      toast.error(codeRes.msg || "Account created, but we couldn't send the code. Try Resend on the next screen.");
-    } else {
-      toast.success("Code sent! Check your email.");
-    }
+    if (!res.ok) return toast.error(res.msg!);
+    toast.success(res.msg || "Code sent! Check your email.");
     nav(`/verify-email?email=${encodeURIComponent(email)}`);
   };
 

@@ -1,8 +1,8 @@
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { Product, seedProducts } from "@/data/products";
 import { notifyAdmin } from "@/lib/adminAuth";
 import { listProducts, createProduct, updateProductRow, deleteProductRow } from "@/lib/productsApi";
+import { signupAndSendCode } from "@/lib/signupVerification";
 
 export interface CartItem { product: Product; qty: number; }
 export interface User { id: string; name: string; email: string; phone?: string; address?: string; isAdmin?: boolean; }
@@ -55,14 +55,6 @@ const KEY = "gilgitify_v1";
 type Persisted = { cart: CartItem[]; orders: Order[]; products: Product[] };
 type ProductMutationResult = { ok: boolean; synced: boolean };
 
-type ProfileRow = {
-  user_id: string;
-  display_name: string | null;
-  email: string | null;
-  phone: string | null;
-  address: string | null;
-};
-
 const SESSION_KEY = "gilgitify_user_session_v1";
 
 function loadStoredUser(): User | null {
@@ -75,28 +67,6 @@ function loadStoredUser(): User | null {
 }
 function saveStoredUser(u: User) { localStorage.setItem(SESSION_KEY, JSON.stringify(u)); }
 function clearStoredUser() { localStorage.removeItem(SESSION_KEY); }
-
-async function loadProfileById(userId: string): Promise<User | null> {
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("user_id, display_name, email, phone, address")
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (!profile) return null;
-  const { data: roles } = await supabase
-    .from("user_roles")
-    .select("role")
-    .eq("user_id", userId);
-  const isAdmin = roles?.some(r => r.role === "admin") ?? false;
-  return {
-    id: profile.user_id,
-    name: profile.display_name || profile.email || "Customer",
-    email: profile.email || "",
-    phone: profile.phone || undefined,
-    address: profile.address || undefined,
-    isAdmin,
-  };
-}
 
 function normalize(data?: Partial<Persisted>): Persisted {
   return {
@@ -116,17 +86,33 @@ function load(): Persisted {
   return normalize();
 }
 
-const toUser = (profile: ProfileRow, fallbackEmail = "", isAdmin = false): User => ({
-  id: profile.user_id,
-  name: profile.display_name || profile.email || fallbackEmail || "Customer",
-  email: profile.email || fallbackEmail,
-  phone: profile.phone || undefined,
-  address: profile.address || undefined,
-  isAdmin,
-});
-
 const API_BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const API_ORDERS = `${API_BASE}/api/orders.php`;
+const API_USERS = `${API_BASE}/api/users.php`;
+
+interface UsersApiResponse { ok?: boolean; msg?: string; user?: { id: string; name: string; email: string; phone?: string | null; address?: string | null; emailVerified?: boolean }; needsVerification?: boolean }
+
+async function callUsers(action: string, body: Record<string, unknown>): Promise<UsersApiResponse | null> {
+  try {
+    const res = await fetch(`${API_USERS}?action=${action}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const ct = res.headers.get("content-type") || "";
+    if (!ct.includes("json")) return null;
+    return await res.json() as UsersApiResponse;
+  } catch { return null; }
+}
+
+const fromApiUser = (u: NonNullable<UsersApiResponse["user"]>): User => ({
+  id: u.id,
+  name: u.name || u.email,
+  email: u.email,
+  phone: u.phone || undefined,
+  address: u.address || undefined,
+  isAdmin: false, // admin auth is handled separately by adminAuth.ts
+});
 
 async function apiGetOrders(): Promise<Order[] | null> {
   try {
@@ -217,41 +203,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // Customer list for admin views — derived from orders. We don't expose a
+  // PHP endpoint that lists all users (that would leak emails); the admin
+  // dashboard's "Clients" tab already builds its list from orders.
   const refreshAdminUsers = useCallback(async () => {
-    const { data: profiles, error } = await supabase
-      .from("profiles")
-      .select("user_id, display_name, email, phone, address")
-      .order("created_at", { ascending: false });
-
-    if (error || !profiles) {
-      setUsers([]);
-      return;
-    }
-
-    setUsers(profiles.map(profile => toUser(profile)));
+    setUsers([]);
   }, []);
 
   useEffect(() => {
-    // Custom auth: session is just a stored user object in localStorage,
-    // mirroring the admin auth pattern. No supabase.auth, no JWT roundtrips.
-    let mounted = true;
-    const syncSession = async () => {
-      const stored = loadStoredUser();
-      if (!stored) {
-        if (mounted) { setUser(null); setUsers([]); setAuthLoading(false); }
-        return;
-      }
-      // Re-fetch the latest profile so name/phone/address stay fresh across devices.
-      const fresh = await loadProfileById(stored.id);
-      if (!mounted) return;
-      const nextUser = fresh || stored;
-      setUser(nextUser);
-      setAuthLoading(false);
-      if (nextUser.isAdmin) await refreshAdminUsers();
-    };
-    syncSession();
-    return () => { mounted = false; };
-  }, [refreshAdminUsers]);
+    // Session = stored user JSON in localStorage. Mirrors admin auth pattern.
+    const stored = loadStoredUser();
+    setUser(stored);
+    setAuthLoading(false);
+  }, []);
 
   const addToCart = useCallback((product: Product, qty = 1) => {
     setState(s => {
@@ -267,50 +231,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const updateQty = (id: string, qty: number) => setState(s => ({ ...s, cart: s.cart.map(c => c.product.id === id ? { ...c, qty: Math.max(1, qty) } : c) }));
   const clearCart = () => setState(s => ({ ...s, cart: [] }));
 
+  // Signup creates the user via /api/users.php and emails the 6-digit code
+  // through FormSubmit, all in one call. The login step is separate and
+  // requires the user to verify their email first.
   const signup: StoreState["signup"] = async (name, email, password) => {
-    const cleanName = name.trim();
-    const cleanEmail = email.trim().toLowerCase();
-    const { error } = await supabase.rpc("app_signup", {
-      _name: cleanName, _email: cleanEmail, _password: password,
-    });
-    if (error) {
-      const msg = /already registered/i.test(error.message)
-        ? "This email is already registered. Try logging in."
-        : /password too short/i.test(error.message)
-          ? "Password must be at least 8 characters."
-          : "Could not create account. Please try again.";
-      return { ok: false, msg };
-    }
-    return { ok: true, msg: "Account created. Enter the 6-digit code we just emailed you." };
+    const res = await signupAndSendCode(name.trim(), email.trim().toLowerCase(), password);
+    if (!res.ok) return { ok: false, msg: res.msg };
+    return { ok: true, msg: res.msg || "Account created. Enter the 6-digit code we just emailed you." };
   };
 
   const login: StoreState["login"] = async (email, password) => {
     const cleanEmail = email.trim().toLowerCase();
-    const { data, error } = await supabase.rpc("app_login", { _email: cleanEmail, _password: password });
-    const row = Array.isArray(data) ? data[0] : null;
-    if (error || !row) return { ok: false, msg: "Invalid email or password" };
-    if (!row.email_verified) {
-      return { ok: false, msg: "Email not verified yet. Check your inbox for the 6-digit code." };
-    }
-
-    // Admin role lookup keeps working — separate hardcoded admin auth still
-    // governs the /admin route, but we still surface the flag here for any
-    // role-based UI.
-    const { data: roles } = await supabase.from("user_roles").select("role").eq("user_id", row.user_id);
-    const isAdmin = roles?.some(r => r.role === "admin") ?? false;
-
-    const nextUser: User = {
-      id: row.user_id,
-      name: row.display_name || row.email || cleanEmail,
-      email: row.email || cleanEmail,
-      phone: row.phone || undefined,
-      address: row.address || undefined,
-      isAdmin,
-    };
+    const res = await callUsers("login", { email: cleanEmail, password });
+    if (!res?.ok || !res.user) return { ok: false, msg: res?.msg || "Invalid email or password" };
+    const nextUser = fromApiUser(res.user);
     saveStoredUser(nextUser);
     setUser(nextUser);
-    if (isAdmin) await refreshAdminUsers();
-    return { ok: true, isAdmin };
+    return { ok: true, isAdmin: false };
   };
 
   const logout = async () => {
@@ -321,21 +258,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const updateProfile: StoreState["updateProfile"] = async (patch) => {
     if (!user) return { ok: false, msg: "You must be logged in." };
-
-    const nextProfile = {
-      display_name: patch.name?.trim() || user.name,
-      phone: patch.phone?.trim() || null,
-      address: patch.address?.trim() || null,
-    };
-
-    const { error } = await supabase
-      .from("profiles")
-      .update(nextProfile)
-      .eq("user_id", user.id);
-
-    if (error) return { ok: false, msg: "Could not update profile." };
-
-    const updated: User = { ...user, ...patch, name: nextProfile.display_name };
+    const res = await callUsers("updateProfile", {
+      id: user.id,
+      email: user.email,
+      name: patch.name?.trim() ?? user.name,
+      phone: patch.phone?.trim() ?? user.phone ?? "",
+      address: patch.address?.trim() ?? user.address ?? "",
+    });
+    if (!res?.ok || !res.user) return { ok: false, msg: res?.msg || "Could not update profile." };
+    const updated = fromApiUser(res.user);
     saveStoredUser(updated);
     setUser(updated);
     return { ok: true };
