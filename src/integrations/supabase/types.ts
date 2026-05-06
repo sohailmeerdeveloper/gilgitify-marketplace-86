@@ -143,7 +143,9 @@ export type Database = {
           created_at: string
           display_name: string
           email: string | null
+          email_verified: boolean
           id: string
+          password_hash: string | null
           phone: string | null
           updated_at: string
           user_id: string
@@ -153,7 +155,9 @@ export type Database = {
           created_at?: string
           display_name?: string
           email?: string | null
+          email_verified?: boolean
           id?: string
+          password_hash?: string | null
           phone?: string | null
           updated_at?: string
           user_id: string
@@ -163,7 +167,9 @@ export type Database = {
           created_at?: string
           display_name?: string
           email?: string | null
+          email_verified?: boolean
           id?: string
+          password_hash?: string | null
           phone?: string | null
           updated_at?: string
           user_id?: string
@@ -202,6 +208,25 @@ export type Database = {
       }
       verify_signup_code: {
         Args: { _email: string; _code: string }
+        Returns: boolean
+      }
+      app_signup: {
+        Args: { _name: string; _email: string; _password: string }
+        Returns: string
+      }
+      app_login: {
+        Args: { _email: string; _password: string }
+        Returns: {
+          user_id: string
+          display_name: string
+          email: string
+          phone: string | null
+          address: string | null
+          email_verified: boolean
+        }[]
+      }
+      app_set_password: {
+        Args: { _email: string; _code: string; _new_password: string }
         Returns: boolean
       }
       has_role: {

@@ -63,6 +63,41 @@ type ProfileRow = {
   address: string | null;
 };
 
+const SESSION_KEY = "gilgitify_user_session_v1";
+
+function loadStoredUser(): User | null {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const u = JSON.parse(raw) as User;
+    return u && typeof u.id === "string" ? u : null;
+  } catch { return null; }
+}
+function saveStoredUser(u: User) { localStorage.setItem(SESSION_KEY, JSON.stringify(u)); }
+function clearStoredUser() { localStorage.removeItem(SESSION_KEY); }
+
+async function loadProfileById(userId: string): Promise<User | null> {
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("user_id, display_name, email, phone, address")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (!profile) return null;
+  const { data: roles } = await supabase
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", userId);
+  const isAdmin = roles?.some(r => r.role === "admin") ?? false;
+  return {
+    id: profile.user_id,
+    name: profile.display_name || profile.email || "Customer",
+    email: profile.email || "",
+    phone: profile.phone || undefined,
+    address: profile.address || undefined,
+    isAdmin,
+  };
+}
+
 function normalize(data?: Partial<Persisted>): Persisted {
   return {
     cart: Array.isArray(data?.cart) ? data.cart : [],
@@ -89,31 +124,6 @@ const toUser = (profile: ProfileRow, fallbackEmail = "", isAdmin = false): User 
   address: profile.address || undefined,
   isAdmin,
 });
-
-async function loadCurrentUser(authUserId: string, fallbackEmail = ""): Promise<User | null> {
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("user_id, display_name, email, phone, address")
-    .eq("user_id", authUserId)
-    .maybeSingle();
-
-  const { data: roles } = await supabase
-    .from("user_roles")
-    .select("role")
-    .eq("user_id", authUserId);
-
-  const isAdmin = roles?.some(role => role.role === "admin") ?? false;
-
-  if (profile) return toUser(profile, fallbackEmail, isAdmin);
-
-  const { data: createdProfile } = await supabase
-    .from("profiles")
-    .insert({ user_id: authUserId, display_name: fallbackEmail, email: fallbackEmail })
-    .select("user_id, display_name, email, phone, address")
-    .maybeSingle();
-
-  return createdProfile ? toUser(createdProfile, fallbackEmail, isAdmin) : null;
-}
 
 const API_BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const API_ORDERS = `${API_BASE}/api/orders.php`;
@@ -222,50 +232,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    // Custom auth: session is just a stored user object in localStorage,
+    // mirroring the admin auth pattern. No supabase.auth, no JWT roundtrips.
     let mounted = true;
-
     const syncSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) {
-        if (mounted) {
-          setUser(null);
-          setUsers([]);
-          setAuthLoading(false);
-        }
+      const stored = loadStoredUser();
+      if (!stored) {
+        if (mounted) { setUser(null); setUsers([]); setAuthLoading(false); }
         return;
       }
-
-      const nextUser = await loadCurrentUser(session.user.id, session.user.email || "");
+      // Re-fetch the latest profile so name/phone/address stay fresh across devices.
+      const fresh = await loadProfileById(stored.id);
       if (!mounted) return;
+      const nextUser = fresh || stored;
       setUser(nextUser);
       setAuthLoading(false);
-      if (nextUser?.isAdmin) await refreshAdminUsers();
+      if (nextUser.isAdmin) await refreshAdminUsers();
     };
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setAuthLoading(true);
-      if (!session?.user) {
-        setUser(null);
-        setUsers([]);
-        setAuthLoading(false);
-        return;
-      }
-
-      setTimeout(async () => {
-        const nextUser = await loadCurrentUser(session.user.id, session.user.email || "");
-        if (!mounted) return;
-        setUser(nextUser);
-        setAuthLoading(false);
-        if (nextUser?.isAdmin) await refreshAdminUsers();
-      }, 0);
-    });
-
     syncSession();
-
-    return () => {
-      mounted = false;
-      subscription.unsubscribe();
-    };
+    return () => { mounted = false; };
   }, [refreshAdminUsers]);
 
   const addToCart = useCallback((product: Product, qty = 1) => {
@@ -285,42 +270,51 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const signup: StoreState["signup"] = async (name, email, password) => {
     const cleanName = name.trim();
     const cleanEmail = email.trim().toLowerCase();
-    // emailRedirectTo points back at this site (never lovable/external) in case
-    // the Supabase project still has confirmation emails enabled. The actual
-    // verification users complete is the 6-digit code we send from /signup.
-    const { data, error } = await supabase.auth.signUp({
-      email: cleanEmail,
-      password,
-      options: {
-        emailRedirectTo: `${window.location.origin}/verify-email?email=${encodeURIComponent(cleanEmail)}`,
-        data: { display_name: cleanName },
-      },
+    const { error } = await supabase.rpc("app_signup", {
+      _name: cleanName, _email: cleanEmail, _password: password,
     });
-
-    if (error) return { ok: false, msg: error.message };
-
-    if (data.user) {
-      await supabase
-        .from("profiles")
-        .upsert({ user_id: data.user.id, display_name: cleanName, email: cleanEmail }, { onConflict: "user_id" });
+    if (error) {
+      const msg = /already registered/i.test(error.message)
+        ? "This email is already registered. Try logging in."
+        : /password too short/i.test(error.message)
+          ? "Password must be at least 8 characters."
+          : "Could not create account. Please try again.";
+      return { ok: false, msg };
     }
-
     return { ok: true, msg: "Account created. Enter the 6-digit code we just emailed you." };
   };
 
   const login: StoreState["login"] = async (email, password) => {
     const cleanEmail = email.trim().toLowerCase();
-    const { data, error } = await supabase.auth.signInWithPassword({ email: cleanEmail, password });
-    if (error || !data.user) return { ok: false, msg: "Invalid email or password" };
+    const { data, error } = await supabase.rpc("app_login", { _email: cleanEmail, _password: password });
+    const row = Array.isArray(data) ? data[0] : null;
+    if (error || !row) return { ok: false, msg: "Invalid email or password" };
+    if (!row.email_verified) {
+      return { ok: false, msg: "Email not verified yet. Check your inbox for the 6-digit code." };
+    }
 
-    const nextUser = await loadCurrentUser(data.user.id, data.user.email || cleanEmail);
+    // Admin role lookup keeps working — separate hardcoded admin auth still
+    // governs the /admin route, but we still surface the flag here for any
+    // role-based UI.
+    const { data: roles } = await supabase.from("user_roles").select("role").eq("user_id", row.user_id);
+    const isAdmin = roles?.some(r => r.role === "admin") ?? false;
+
+    const nextUser: User = {
+      id: row.user_id,
+      name: row.display_name || row.email || cleanEmail,
+      email: row.email || cleanEmail,
+      phone: row.phone || undefined,
+      address: row.address || undefined,
+      isAdmin,
+    };
+    saveStoredUser(nextUser);
     setUser(nextUser);
-    if (nextUser?.isAdmin) await refreshAdminUsers();
-    return { ok: true, isAdmin: Boolean(nextUser?.isAdmin) };
+    if (isAdmin) await refreshAdminUsers();
+    return { ok: true, isAdmin };
   };
 
   const logout = async () => {
-    await supabase.auth.signOut();
+    clearStoredUser();
     setUser(null);
     setUsers([]);
   };
@@ -329,20 +323,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!user) return { ok: false, msg: "You must be logged in." };
 
     const nextProfile = {
-      user_id: user.id,
       display_name: patch.name?.trim() || user.name,
       phone: patch.phone?.trim() || null,
       address: patch.address?.trim() || null,
-      email: user.email,
     };
 
     const { error } = await supabase
       .from("profiles")
-      .upsert(nextProfile, { onConflict: "user_id" });
+      .update(nextProfile)
+      .eq("user_id", user.id);
 
     if (error) return { ok: false, msg: "Could not update profile." };
 
-    setUser(s => s ? { ...s, ...patch, name: nextProfile.display_name } : s);
+    const updated: User = { ...user, ...patch, name: nextProfile.display_name };
+    saveStoredUser(updated);
+    setUser(updated);
     return { ok: true };
   };
 
